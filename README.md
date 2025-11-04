@@ -28,7 +28,7 @@ Dazu werden Sensordaten (z. B. Kameraaufnahmen und Steuerbefehle) aus dem **Fahr
 * Hilft beim **Bestimmen des passenden Bildausschnitts (Cropping)** für die Trainingsdaten.
 * Die Werte des gefunden Crops können ausgeben werden und in `create_train_data.py` verwendet werden
 * Praktisch, um irrelevante Teile (z. B. Cockpit oder Himmel) zu entfernen.
-![Verwendung von crop_finder.py](image.png)
+![Verwendung von crop_finder.py](Pictures/image.png)
 
 ### `test_labels.py`
 
@@ -39,8 +39,8 @@ Dazu werden Sensordaten (z. B. Kameraaufnahmen und Steuerbefehle) aus dem **Fahr
   * `trim_video_start_sec = 0.0`
   * `sample_stride = 1`
     Damit die Label-Zeiten exakt mit den Videoframes übereinstimmen.
-![alt text](image-1.png)
-![alt text](image-2.png)
+![alt text](Pictures/image-1.png)
+![alt text](Pictures/image-2.png)
 ---
 
 ## Setup & Nutzung
