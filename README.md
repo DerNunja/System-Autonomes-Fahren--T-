@@ -60,7 +60,7 @@ pip install -r requirements.txt
 
 ---
 
-## 🧠 Geplante Erweiterungen
+## Geplante Erweiterungen
 
 * Integration eines neuronalen Fahrmodells (Behavioural Cloning)
 * Online-Synchronisierung mit dem Weltmodell
@@ -70,7 +70,7 @@ pip install -r requirements.txt
 
 ---
 
-## 💡 Mitwirken
+## Mitwirken
 
 Ideen, Verbesserungen oder Namensvorschläge für das **„T“** sind ausdrücklich willkommen!
 Erstelle einfach ein Issue oder öffne einen Pull Request.
