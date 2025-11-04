@@ -14,7 +14,7 @@ max_len_px   = 180
 center_ratio = (0.5, 0.8)
 
 # Zeitfenster
-csv_time_offset_sec = 0  # d.h. CSV startet 24 s VOR Video
+csv_time_offset_sec = 0  #kann ignoriert werden
 duration_sec = 120.0 
 
 max_angle_deg = 35.0
@@ -42,9 +42,7 @@ h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 print(f"[INFO] Auflösung: {w}x{h}, FPS: {fps}")
 
 
-# passendes Label-Offset (damit Frame 0 nach dem Sprung zum richtigen Label passt)
 frames_offset = int(round(csv_time_offset_sec * fps))
-# ---- Writer ----
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
 
