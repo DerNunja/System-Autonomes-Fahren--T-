@@ -1,4 +1,4 @@
-# System Autonomes Fahren (T) – SAFT
+# System Autonomes Fahren (T) – S.A.F.T
 
 Projekt zur Entwicklung eines autonomen Fahrsystems mithilfe des Fahrsimulators der Hochschule Harz.
 *(Das „T“ steht aktuell noch offen – Vorschläge sind willkommen!)*
