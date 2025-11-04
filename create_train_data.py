@@ -19,7 +19,7 @@ ALIGN_BY = "timestamp"  # oder "frame"
 # Steuerung
 fallback_fps          = 60.0
 csv_time_offset_sec   = 23.111638     # richtiger start des videos
-trim_video_start_sec  = 0.0           # schneidet cruden splashscreen weg
+trim_video_start_sec  = 4.0           # schneidet cruden splashscreen weg
 duration_sec          = 100           # wie viele minuten des videos verwendet werden sollen
 sample_stride         = 1             # jeder x-te frame wird verwendet; 1=alle Frames
 
@@ -62,11 +62,10 @@ for col in required_cols:
 
 needed = set(["timestamp"] + required_cols + [c for c in optional_cols if c in ["frame_idx","t_sec"]])
 try:
-    # Nur relevante Spalten laden, falls CSV Header diese hat – sonst alle laden
     preview = pd.read_csv(labels_path, nrows=0)
     usecols = [c for c in preview.columns if c in needed]
     if "timestamp" not in usecols:
-        usecols = None  # falls Spaltennamen anders/unerwartet sind
+        usecols = None
 except Exception:
     usecols = None
 
@@ -103,7 +102,6 @@ dropped = before - len(df)
 if dropped > 0:
     print(f"[CLEAN] {dropped} Zeilen ohne gültigen 'timestamp' entfernt.")
 
-# Timestamp-Einheit erkennen -> Sekunden
 ts_med = float(df["timestamp"].median())
 if ts_med > 1e12:
     df["timestamp"] = df["timestamp"] / 1e9
@@ -115,7 +113,6 @@ elif ts_med > 1e9:
 df = df.sort_values("timestamp").reset_index(drop=True)
 
 if ALIGN_BY == "timestamp":
-    # === Neue Variante: CSV an nächstliegendem timestamp schneiden ===
     diff = (df["timestamp"] - float(csv_time_offset_sec)).abs()
     nearest_idx = int(diff.idxmin())
     t0 = float(df.loc[nearest_idx, "timestamp"])
@@ -126,21 +123,15 @@ if ALIGN_BY == "timestamp":
 
     df = df.loc[nearest_idx:].copy().reset_index(drop=True)
 
-    # leichte Lücken in Pflichtspalten füllen
     df[required_cols] = df[required_cols].ffill().bfill()
 
-    # Relativzeit ab gefundenem CSV-Start
     df["t_video"] = df["timestamp"] - t0
 
 elif ALIGN_BY == "frame":
-    # === Alte Variante: nur Startframe per trim_video_start_sec; CSV ungeschnitten ===
-    # Relativzeit ab vorgegebenem csv_time_offset_sec
     df["t_video"] = df["timestamp"] - float(csv_time_offset_sec)
 
-    # optional: negative Zeiten knapp unter 0 tolerieren/wegschneiden wie früher
     df = df[df["t_video"] >= -1e-6].copy().reset_index(drop=True)
 
-    # leichte Lücken in Pflichtspalten füllen
     df[required_cols] = df[required_cols].ffill().bfill()
 
 else:
@@ -160,8 +151,6 @@ W0 = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 H0 = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 print(f"[INFO] Video: {W0}x{H0}, FPS={fps}, Frames={n_total_frames}")
 
-
-
 start_frame = int(round(trim_video_start_sec * fps))
 end_frame_exclusive = n_total_frames if duration_sec is None else min(n_total_frames, start_frame + int(round(duration_sec * fps)))
 if start_frame >= n_total_frames:
@@ -169,15 +158,11 @@ if start_frame >= n_total_frames:
 
 cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-
-
 frame_indices = np.arange(start_frame, end_frame_exclusive, dtype=int)
 t_videos = (frame_indices - start_frame) / fps  
 
 frames_df = pd.DataFrame({"frame_idx_abs": frame_indices, "t_video": t_videos})
 frames_df = frames_df.iloc[::sample_stride].reset_index(drop=True)
-
-
 
 frames_df = frames_df.sort_values("t_video")
 df = df.sort_values("t_video")
@@ -188,8 +173,6 @@ aligned = pd.merge_asof(
     on="t_video", direction="nearest", tolerance=tolerance
 )
 aligned = aligned.ffill().bfill()
-
-
 
 out_frames_dir.mkdir(parents=True, exist_ok=True)
 out_labels_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -202,14 +185,12 @@ export_count = 0
 need_abs = set(frames_df["frame_idx_abs"].tolist())
 
 
-
 pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
 while pos < start_frame:
     ok, _ = cap.read()
     if not ok:
         break
     pos += 1
-
 
 
 while True:
