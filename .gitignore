@@ -1,0 +1,119 @@
+# ========================================
+
+# Python Build & Cache Files
+
+# ========================================
+
+**pycache**/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Bytecode / Compiled Extensions
+
+*.so
+*.pyd
+*.dll
+
+# Packaging / Distribution
+
+build/
+dist/
+downloads/
+.eggs/
+*.egg-info/
+*.egg
+*.whl
+*.manifest
+*.spec
+
+# Logs / Reports
+
+*.log
+pip-log.txt
+pip-delete-this-directory.txt
+coverage.xml
+*.cover
+*.py,cover
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+.cache/
+cover/
+.mypy_cache/
+.dmypy.json
+.pytype/
+.pyre/
+
+# IDE / Editor
+
+.idea/
+.vscode/
+.spyderproject
+.spyproject
+.ropeproject
+
+# Documentation
+
+docs/_build/
+site/
+
+# ========================================
+
+# Project-specific exclusions
+
+# ========================================
+
+# --- Behavioural_Cloning: Data Outputs ---
+
+# Raw recordings (large video + telemetry data)
+
+Behavioural_Cloning/data/Recordings/Video/
+Behavioural_Cloning/data/Recordings/TabData/
+
+# Generated / processed data
+
+Behavioural_Cloning/data/Processed/frames/
+Behavioural_Cloning/data/Processed/seg_masks/
+Behavioural_Cloning/data/Processed/test_labels.mp4
+
+# Generated label mappings (reproducible)
+
+# -> falls du diese speichern willst, kommentiere die Zeile aus
+
+Behavioural_Cloning/data/Processed/labels/labels_to_frames.csv
+
+# Temporary exports or test data
+
+Behavioural_Cloning/data/tmp/
+Behavioural_Cloning/data/test/
+tmp/
+*.tmp
+
+# ========================================
+
+# System Files
+
+# ========================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========================================
+
+# Optional — if you use Jupyter
+
+# ========================================
+
+.ipynb_checkpoints/
