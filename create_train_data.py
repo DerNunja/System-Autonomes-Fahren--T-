@@ -5,12 +5,12 @@ from pathlib import Path
 
 # ===================== Parameter =====================
 # Eingaben
-video_path  = Path("Behavioural_Cloning/data/Recordings/Video/u_2025-05-23 10-47-10_h264.mp4")
-labels_path = Path("Behavioural_Cloning/data/Recordings/TabData/u_recording_2025_05_23__11_14_03.csv")
+video_path  = Path("Behavioural_Cloning_Basic/data/Recordings/Video/u_2025-05-23 10-47-10_h264.mp4")
+labels_path = Path("Behavioural_Cloning_Basic/data/Recordings/TabData/u_recording_2025_05_23__11_14_03.csv")
 
 # Ausgaben
-out_frames_dir = Path("Behavioural_Cloning/data/Processed/frames")
-out_labels_csv = Path("Behavioural_Cloning/data/Processed/labels/labels_to_frames.csv")
+out_frames_dir = Path("Behavioural_Cloning_Basic/data/Processed/frames")
+out_labels_csv = Path("Behavioural_Cloning_Basic/data/Processed/labels/labels_to_frames.csv")
 
 # "timestamp"  -> CSV am nächstliegenden 'timestamp' zu csv_time_offset_sec schneiden
 # "frame"      -> nur Video-Start über trim_video_start_sec setzen 

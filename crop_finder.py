@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 
 
-video_path = Path("Behavioural_Cloning/data/Recordings/Video/u_2025-05-23 10-47-10_h264.mp4")
+video_path = Path("Behavioural_Cloning_Basic/data/Recordings/Video/u_2025-05-23 10-47-10_h264.mp4")
 fallback_fps = 60.0  
 
 # Fenstername

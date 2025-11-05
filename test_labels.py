@@ -4,9 +4,9 @@ import pandas as pd
 from pathlib import Path
 
 # ---- Pfade ----
-video_path  = Path("Behavioural_Cloning/data/Recordings/Video/u_2025-05-23 10-47-10_h264.mp4")
-labels_path = Path("Behavioural_Cloning/data/Processed/labels/labels_to_frames.csv")
-out_path    = Path("Behavioural_Cloning/data/Processed/test_labels.mp4")
+video_path  = Path("Behavioural_Cloning_Basic/data/Recordings/Video/u_2025-05-23 10-47-10_h264.mp4")
+labels_path = Path("Behavioural_Cloning_Basic/data/Processed/labels/labels_to_frames.csv")
+out_path    = Path("Behavioural_Cloning_Basic/data/Processed/test_labels.mp4")
 
 # ---- Parameter ----
 fallback_fps = 60.0

@@ -1,15 +1,12 @@
 # ========================================
-
 # Python Build & Cache Files
-
 # ========================================
 
-**pycache**/
+__pycache__/
 *.py[cod]
 *$py.class
 
 # Virtual Environments
-
 .env
 .venv
 env/
@@ -19,13 +16,11 @@ env.bak/
 venv.bak/
 
 # Bytecode / Compiled Extensions
-
 *.so
 *.pyd
 *.dll
 
 # Packaging / Distribution
-
 build/
 dist/
 downloads/
@@ -37,7 +32,6 @@ downloads/
 *.spec
 
 # Logs / Reports
-
 *.log
 pip-log.txt
 pip-delete-this-directory.txt
@@ -56,7 +50,6 @@ cover/
 .pyre/
 
 # IDE / Editor
-
 .idea/
 .vscode/
 .spyderproject
@@ -64,46 +57,38 @@ cover/
 .ropeproject
 
 # Documentation
-
 docs/_build/
 site/
 
 # ========================================
-
-# Project-specific exclusions
-
+# Projekt-spezifische Excludes
 # ========================================
 
-# --- Behavioural_Cloning: Data Outputs ---
+# --- Rohdaten & Aufnahmen (sehr groß) ---
+Behavioural_Cloning_Basic/data/Recordings/Video/
+Behavioural_Cloning_Basic/data/Recordings/TabData/
 
-# Raw recordings (large video + telemetry data)
+# --- Generierte/Verarbeitete Daten ---
+Behavioural_Cloning_Basic/data/Processed/frames/
+Behavioural_Cloning_Basic/data/Processed/seg_masks/
+Behavioural_Cloning_Basic/data/Processed/LaneDetection/
+Behavioural_Cloning_Basic/data/Processed/test_labels.mp4
 
-Behavioural_Cloning/data/Recordings/Video/
-Behavioural_Cloning/data/Recordings/TabData/
+# -> Wenn du die Label-Mapping-Datei versionieren willst, kommentiere die nächste Zeile aus
+Behavioural_Cloning_Basic/data/Processed/labels/labels_to_frames.csv
 
-# Generated / processed data
-
-Behavioural_Cloning/data/Processed/frames/
-Behavioural_Cloning/data/Processed/seg_masks/
-Behavioural_Cloning/data/Processed/test_labels.mp4
-
-# Generated label mappings (reproducible)
-
-# -> falls du diese speichern willst, kommentiere die Zeile aus
-
-Behavioural_Cloning/data/Processed/labels/labels_to_frames.csv
-
-# Temporary exports or test data
-
-Behavioural_Cloning/data/tmp/
-Behavioural_Cloning/data/test/
+# Temporäre Exporte / Tests
+Behavioural_Cloning_Basic/data/tmp/
+Behavioural_Cloning_Basic/data/test/
 tmp/
 *.tmp
 
+# --- ML-Gewichte / große Binärdateien ---
+# (aktuell liegt z.B. tusimple_res18.pth hier – typischerweise nicht versionieren)
+Behavioural_Cloning_Basic/LaneDetection/weights/*.pth
+
 # ========================================
-
 # System Files
-
 # ========================================
 
 .DS_Store
@@ -111,9 +96,7 @@ Thumbs.db
 desktop.ini
 
 # ========================================
-
-# Optional — if you use Jupyter
-
+# Optional — Jupyter
 # ========================================
 
 .ipynb_checkpoints/
