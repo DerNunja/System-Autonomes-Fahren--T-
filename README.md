@@ -76,3 +76,7 @@ Ideen, Verbesserungen oder Namensvorschläge für das **„T“** sind ausdrück
 Erstelle einfach ein Issue oder öffne einen Pull Request.
 
 ---
+
+## Resources 
+Ultra-Fast-Lane-Detection-v2 pyTorch Implementation (verwendet in ../LaneDetection)
+https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2?tab=readme-ov-file
