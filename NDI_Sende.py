@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import time
 
-VIDEO_PATH = "dein_video_vom_prof.mp4" # <-- HIER  DATEi EINFÜGEN
+VIDEO_PATH = "video-.mp4" # <-- HIER  DATEi EINFÜGEN
 SOURCE_NAME = "Simu_Video_Feed"
 
 def run_sender():
