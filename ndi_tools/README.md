@@ -11,7 +11,7 @@ Dieses Tool sendet und empfängt Videostreams über das NDI-Protokoll (Network D
 ##  Voraussetzungen
 
 1. **NDI SDK / Runtime installieren**  
-    [https://ndi.video/ndi-sdk/](https://ndi.video/ndi-sdk/)  
+    [https://ndi.video/ndi-sdk/](https://ndi.video/ndi-sdk/)  ndi_sdk 5
    Stelle sicher, dass die Datei  
    `C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll`  
    existiert.
