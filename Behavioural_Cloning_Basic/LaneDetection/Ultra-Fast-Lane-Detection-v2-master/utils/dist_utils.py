@@ -170,4 +170,3 @@ def dist_tqdm(obj, *args, **kwargs):
         return tqdm.tqdm(obj, *args, **kwargs)
     else:
         return obj
-
