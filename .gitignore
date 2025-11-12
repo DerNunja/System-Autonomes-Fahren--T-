@@ -1,7 +1,6 @@
 # ========================================
 # Python Build & Cache Files
 # ========================================
-
 __pycache__/
 *.py[cod]
 *$py.class
@@ -33,6 +32,7 @@ downloads/
 
 # Logs / Reports
 *.log
+*.tmp
 pip-log.txt
 pip-delete-this-directory.txt
 coverage.xml
@@ -60,43 +60,41 @@ cover/
 docs/_build/
 site/
 
+#Roh-Daten
+Behavioural_Cloning_Basic/data/Recordings/Video/
+Behavioural_Cloning_Basic/data/Recordings/TabData/
+
 # ========================================
 # Projekt-spezifische Excludes
 # ========================================
 
-# --- Rohdaten & Aufnahmen (sehr groß) ---
-Behavioural_Cloning_Basic/data/Recordings/Video/
-Behavioural_Cloning_Basic/data/Recordings/TabData/
+# --- Modelle & Gewichte ---
+# (Culan & Tusimple → nicht versionieren)
+Behavioural_Cloning_Basic/LaneDetection/weights/*.pth
+weights/*.pth
 
-# --- Generierte/Verarbeitete Daten ---
+# --- Cache-Ordner vom Modell ---
+LaneDetection/model/__pycache__/
+LaneDetection/utils/__pycache__/
+
+# --- Prozessierte/ temporäre Daten (optional) ---
+# Falls du Demo-Bilder renderst o.ä.
+LaneDetection/output/
+LaneDetection/tmp/
+
+# --- Prozessierte/dynamische Daten ---
 Behavioural_Cloning_Basic/data/Processed/frames/
 Behavioural_Cloning_Basic/data/Processed/seg_masks/
 Behavioural_Cloning_Basic/data/Processed/LaneDetection/
-Behavioural_Cloning_Basic/data/Processed/test_labels.mp4
-
-# -> Wenn du die Label-Mapping-Datei versionieren willst, kommentiere die nächste Zeile aus
-Behavioural_Cloning_Basic/data/Processed/labels/labels_to_frames.csv
-
-# Temporäre Exporte / Tests
 Behavioural_Cloning_Basic/data/tmp/
 Behavioural_Cloning_Basic/data/test/
-tmp/
-*.tmp
-
-# --- ML-Gewichte / große Binärdateien ---
-# (aktuell liegt z.B. tusimple_res18.pth hier – typischerweise nicht versionieren)
-Behavioural_Cloning_Basic/LaneDetection/weights/*.pth
-
+Behavioural_Cloning_Basic/data/Processed/test_labels.mp4
 # ========================================
 # System Files
 # ========================================
-
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ========================================
 # Optional — Jupyter
-# ========================================
-
 .ipynb_checkpoints/
