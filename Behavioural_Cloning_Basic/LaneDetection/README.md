@@ -9,7 +9,7 @@ UFLD (Ultra-Fast Lane Detection) ist ein hochoptimiertes CNN-basiertes Lane-Dete
 * das Bild wird in ein spatiales Grid unterteilt
 * Für jede Zeile des Grids schätzt das Modell:
   * Lane-Positionen (x-Koordinaten)
-  * Existenzwahrscheinlichkeiten.
+  * Existenzwahrscheinlichkeiten
 
 UFLD liefert also Lane-Vektoren anstelle von Segmentation-Masken.
 
