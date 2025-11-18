@@ -15,20 +15,18 @@ def pred2coords_mixed(pred, row_anchor, model_w, cfg,
       y:   in CULane-Höhe (590px), inkl. crop_offset (crop_ratio)
     """
     _, G_r, C_r, L = pred['loc_row'].shape
-    loc_row      = pred['loc_row'][0].cpu()                 # [G_r, C_r, L]
-    max_idx_row  = pred['loc_row'].argmax(1)[0].cpu()       # [C_r, L]
-    exist_row_p  = pred['exist_row'].softmax(1)[0,1].cpu()  # [C_r, L]
+    loc_row      = pred['loc_row'][0].cpu()                 
+    max_idx_row  = pred['loc_row'].argmax(1)[0].cpu()       
+    exist_row_p  = pred['exist_row'].softmax(1)[0,1].cpu()  
 
-    # Score pro Lane: Mittelwert Existenzwahrscheinlichkeit über alle Anchors
     lane_scores = exist_row_p.mean(0)                       # [L]
     picked = torch.argsort(lane_scores, descending=True)[:min(topk_lanes, L)].tolist()
 
-    VIS_CROP_TOP = -0.8   # 0 = ganz oben im Bild, 1 = ganz unten
+    VIS_CROP_TOP = -0.8   # lane detection zurück korrigieren nur wichtig für vis
     VIS_CROP_BOTTOM = 1.0
     VIS_CROP_RANGE = VIS_CROP_BOTTOM - VIS_CROP_TOP
     CANON_H = 590.0
 
-                       # Anteil oben abgeschnitten
 
     lanes_xy = []
     lanes_info = []  # für Debug
@@ -36,7 +34,7 @@ def pred2coords_mixed(pred, row_anchor, model_w, cfg,
     for lane in picked:
         xs, ys = [], []
         for k in range(C_r):
-            # Anchor wird ignoriert, wenn Existenz-Warscheinlichkeit zu klein
+
             if float(exist_row_p[k, lane]) < thr_row:
                 continue
 
@@ -45,20 +43,16 @@ def pred2coords_mixed(pred, row_anchor, model_w, cfg,
             right = min(G_r - 1, center + local_width)
             inds = torch.arange(left, right + 1)
 
-            # Soft-Argmax im lokalen Fenster
             probs = loc_row[inds, k, lane].softmax(0)
             x_hat = (probs * inds.float()).sum() + 0.5
 
-            # x in MODEL_W-Raum
             x = float(x_hat) / (G_r - 1) * model_w
 
-            # y: row_anchor ist [0..1] im gecroppten Bereich → auf 590 mappen
             y = (VIS_CROP_TOP + float(row_anchor[k]) * VIS_CROP_RANGE) * CANON_H   
 
             xs.append(x)
             ys.append(y)
 
-        # 1D-Median-Glättung der x-Koordinaten
         if len(xs) >= smooth_kernel:
             xs_np = np.array(xs, dtype=np.float32)
             radius = smooth_kernel // 2
@@ -112,7 +106,6 @@ def draw_lanes_mixed(vis_bgr, lanes_xy, sx_model_w, sy_canon_h,
             cv2.circle(vis_bgr, tuple(pts[0]), 3, color, -1, lineType=cv2.LINE_AA)
 
         if debug:
-            # kleine Punkte an allen Stützstellen
             for (x_model, y_canon) in lane:
                 xi = int(round(x_model * sx_model_w))
                 yi = int(round(y_canon * sy_canon_h))
@@ -120,7 +113,6 @@ def draw_lanes_mixed(vis_bgr, lanes_xy, sx_model_w, sy_canon_h,
                     cv2.circle(vis_bgr, (xi, yi), 4, (0, 0, 255), -1, lineType=cv2.LINE_AA)
 
     if debug:
-        # Text-Overlay mit Anzahl Lanes & Punkten
         txt = f"lanes={len(lanes_xy)} | pts={pts_count}"
         if lanes_info:
             scores = [f"{info['score']:.2f}" for info in lanes_info]
@@ -136,12 +128,10 @@ def process_image(image_path, net, cfg, img_transforms, device):
     MODEL_W, MODEL_H = cfg.train_width, cfg.train_height
     CANON_W, CANON_H = 1640, 590
 
-    # Inferenz im Netzraum
     image_tensor = img_transforms(pil_img).unsqueeze(0).to(device)
     with torch.no_grad():
         pred = net(image_tensor)
 
-    # Lane-Koordinaten im Modell-/CULane-Raum berechnen
     lanes_xy, lanes_info = pred2coords_mixed(
         pred,
         cfg.row_anchor,
@@ -174,26 +164,22 @@ def process_image(image_path, net, cfg, img_transforms, device):
 
     vis = cv2.imread(image_path)
 
-    # Debug: CULane-Cropbereich einzeichnen
     if DEBUG:
         r_crop  = float(getattr(cfg, "crop_ratio", 1.0))
         crop_top = 1.0 - r_crop
         crop_y_top_img = int(round(crop_top * CANON_H * sy_canon_h))
         crop_y_bottom_img = int(round(CANON_H * sy_canon_h))
 
-        # oberer Rand des genutzten Bereichs (blau)
         cv2.line(vis, (0, crop_y_top_img), (W-1, crop_y_top_img), (255, 0, 0), 2)
         cv2.putText(vis, "CULane crop top", (10, crop_y_top_img - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
 
-        # optional: halbtransparentes Overlay über dem „aktiven“ Bereich
         overlay = vis.copy()
         cv2.rectangle(overlay, (0, crop_y_top_img), (W-1, min(H-1, crop_y_bottom_img)),
                       (255, 0, 0), thickness=-1)
-        alpha = 0.12
+        alpha = 0.1
         vis = cv2.addWeighted(overlay, alpha, vis, 1 - alpha, 0)
 
-    # Lanes einzeichnen (mit Muster-Heuristik)
     vis = draw_lanes_mixed(
         vis, lanes_xy,
         sx_model_w=sx_model_w,
