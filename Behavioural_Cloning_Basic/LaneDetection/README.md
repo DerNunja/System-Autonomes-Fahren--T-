@@ -15,7 +15,7 @@ UFLD liefert also Lane-Vektoren anstelle von Segmentation-Masken.
 
 ---
 
-Unsere Anwendung des Lane Detections Modell ´demo.py´ ist eine abgewandelte Version von ´demo.py´ aus dem Original Repo. Bisher wurde es vorallem um eine umfangreiche Debug Funktion ergänzt.
+Unsere Anwendung des Lane Detections Modell `LaneDetec.py` ist eine abgewandelte Version von `demo.py` aus dem Original Repo. Bisher wurde es vorallem um eine umfangreiche Debug Funktion ergänzt.
 Im aktuellen Zustand zeigt das Debug-Overlay:
 * Anzahl der detektierten Lanes
 * Anzahl der Punkte pro Lane
