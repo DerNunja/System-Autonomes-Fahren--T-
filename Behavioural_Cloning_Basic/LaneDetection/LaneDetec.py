@@ -1,11 +1,13 @@
 from PIL import Image
-import torch, os, cv2
+import torch
+import os
+import cv2
 from utils.common import merge_config
 import torchvision.transforms as transforms
 from model.model_culane import parsingNet as LaneNet
 import numpy as np
 
-DEBUG = True  # globales Debug-Flag
+DEBUG = True  # globale Debug-Flag
 
 def pred2coords_mixed(pred, row_anchor, model_w, cfg,
                       thr_row=0.75, local_width=2, topk_lanes=2, smooth_kernel=5):
