@@ -5,8 +5,8 @@ from pathlib import Path
 
 # ===================== Parameter =====================
 # Eingaben
-video_path  = Path("Behavioural_Cloning_Basic/data/Recordings/Video/u_2025-05-23 10-47-10_h264.mp4")
-labels_path = Path("Behavioural_Cloning_Basic/data/Recordings/TabData/u_recording_2025_05_23__11_14_03.csv")
+video_path  = Path("Behavioural_Cloning_Basic/data/Recordings/Video/ego_h264.mp4")
+labels_path = Path("Behavioural_Cloning_Basic/data/Recordings/TabData/ego.csv")
 
 # Ausgaben
 out_frames_dir = Path("Behavioural_Cloning_Basic/data/Processed/frames")
@@ -20,14 +20,15 @@ ALIGN_BY = "timestamp"  # oder "frame"
 fallback_fps          = 60.0
 csv_time_offset_sec   = 23.111638     # richtiger start des videos
 trim_video_start_sec  = 4.0           # schneidet cruden splashscreen weg
-duration_sec          = 100           # wie viele minuten des videos verwendet werden sollen
+duration_sec          = 180           # wie viele minuten des videos verwendet werden sollen
 sample_stride         = 1             # jeder x-te frame wird verwendet; 1=alle Frames
 
 image_ext             = ".jpg"
 jpeg_quality          = 95
 
 # um crop fein abzustimmen verwende crop_finder.py
-crop_box              = (482, 210, 960, 300)   
+#crop_box              = (0, 0, 1920, 1080)   
+crop_box              = (0, 0, 1920, 1080)   
 scale_percent         = 100     #skaliert das video 100%= keine skalierung bsp. 50% skalierung bei 1920x1080px = 960x540px                     
 
 # double check der wichtigen features
