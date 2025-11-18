@@ -12,7 +12,7 @@ Dazu werden Sensordaten (z. B. Kameraaufnahmen und Steuerbefehle) aus dem **Fahr
 
 ---
 
-## Tools zur Datenvorverarbeitung
+## Tools zur Datenvorverarbeitung (`little_helpers`)
 
 ### `create_train_data.py`
 
