@@ -1,9 +1,9 @@
 import torch
-from model.backbone import resnet
+from .backbone import resnet
 import numpy as np
-from utils.common import initialize_weights
-from model.seg_model import SegHead
-from model.layer import CoordConv
+from ..utils.common import initialize_weights
+from .seg_model import SegHead
+from .layer import CoordConv
 
 class parsingNet(torch.nn.Module):
     def __init__(self, pretrained=True, backbone='50', num_grid_row = None, num_cls_row = None, num_grid_col = None, num_cls_col = None, num_lane_on_row = None, num_lane_on_col = None, use_aux=False,input_height = None, input_width = None, fc_norm = False):

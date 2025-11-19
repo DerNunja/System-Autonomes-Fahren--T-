@@ -2,9 +2,9 @@ import os, argparse
 try:
     from data.dali_data import TrainCollect  # nur fürs Training nötig
 except Exception:
-    TrainCollect = None  # erlaubt demo.py ohne DALI
-from utils.dist_utils import get_rank, get_world_size, is_main_process, dist_print, DistSummaryWriter
-from utils.config import Config
+    TrainCollect = None  
+from .dist_utils import get_rank, get_world_size, is_main_process, dist_print, DistSummaryWriter
+from .config import Config
 import torch
 import time
 

@@ -2,12 +2,59 @@ from PIL import Image
 import torch
 import os
 import cv2
-from utils.common import merge_config
+from .utils.common import merge_config
 import torchvision.transforms as transforms
-from model.model_culane import parsingNet as LaneNet
+from .model.model_culane import parsingNet as LaneNet
 import numpy as np
 
 DEBUG = True  # globale Debug-Flag
+
+def init_lanedetector():
+    """Initialisiert Netz, Config, Transforms und Device nur einmal."""
+    torch.backends.cudnn.benchmark = True
+    args, cfg = merge_config()
+
+    CANON_W, CANON_H = 1640, 590
+
+    row_anchor_np = np.array(cfg.row_anchor, dtype=float)
+    row_anchor_are_ratio = float(row_anchor_np.max()) <= 1.5
+    print(f"row_anchor max={row_anchor_np.max():.3f} ->",
+          "RATIO" if row_anchor_are_ratio else "PIXELS@590")
+
+    cfg.dataset = 'CULane'
+    cfg.batch_size = 1
+    print('DATASET =', cfg.dataset)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    net = LaneNet(
+        pretrained=True,
+        backbone=cfg.backbone,
+        num_grid_row=cfg.num_cell_row,
+        num_cls_row=cfg.num_row,
+        num_grid_col=cfg.num_cell_col,
+        num_cls_col=cfg.num_col,
+        num_lane_on_row=cfg.num_lanes,
+        num_lane_on_col=cfg.num_lanes,
+        use_aux=cfg.use_aux,
+        input_height=cfg.train_height,
+        input_width=cfg.train_width,
+        fc_norm=cfg.fc_norm,
+    ).to(device)
+    net.eval()
+
+    state = torch.load(cfg.test_model, map_location=device)['model']
+    state = {(k[7:] if k.startswith('module.') else k): v for k, v in state.items()}
+    net.load_state_dict(state, strict=False)
+
+    img_transforms = transforms.Compose([
+        transforms.Resize((cfg.train_height, cfg.train_width)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406),
+                             (0.229, 0.224, 0.225)),
+    ])
+
+    return net, cfg, img_transforms, device
 
 def pred2coords_mixed(pred, row_anchor, model_w, cfg,
                       thr_row=0.75, local_width=2, topk_lanes=2, smooth_kernel=5):
@@ -124,11 +171,20 @@ def draw_lanes_mixed(vis_bgr, lanes_xy, sx_model_w, sy_canon_h,
 
     return vis_bgr
 
-def process_image(image_path, net, cfg, img_transforms, device):
-    pil_img = Image.open(image_path).convert('RGB')
-    W, H = pil_img.size
+def process_frame(frame_bgr, net, cfg, img_transforms, device):
+    """
+    Nimmt ein BGR-Frame (numpy, z.B. aus OpenCV/NDI) und gibt ein
+    annotiertes BGR-Frame zurück.
+    """
+    # Originalgröße
+    H, W = frame_bgr.shape[:2]
+
     MODEL_W, MODEL_H = cfg.train_width, cfg.train_height
     CANON_W, CANON_H = 1640, 590
+
+    # BGR (OpenCV) -> RGB (PIL) für die Transforms
+    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(frame_rgb)
 
     image_tensor = img_transforms(pil_img).unsqueeze(0).to(device)
     with torch.no_grad():
@@ -149,22 +205,22 @@ def process_image(image_path, net, cfg, img_transforms, device):
     sx_model_w = W / MODEL_W          # x: MODEL_W -> W
     sy_canon_h = H / CANON_H          # y: 590 -> H
 
-    # Debug: Infos ausgeben
     if DEBUG:
         r_crop  = float(getattr(cfg, "crop_ratio", 1.0))
         crop_top = 1.0 - r_crop
         crop_y_top_img = int(round(crop_top * CANON_H * sy_canon_h))
         crop_y_bottom_img = int(round(CANON_H * sy_canon_h))
 
-        print(f"\n[DEBUG] Image {os.path.basename(image_path)}:")
+        print(f"\n[DEBUG] Frame:")
         print(f"  orig_wh=({W}x{H})  model_wh=({MODEL_W}x{MODEL_H})  canon_h={CANON_H}")
         print(f"  sx_model_w={sx_model_w:.3f}  sy_canon_h={sy_canon_h:.3f}")
         print(f"  row_anchor max={max(cfg.row_anchor):.3f}")
         print(f"  crop_ratio={r_crop:.3f}  -> crop_top={crop_top:.3f}")
-        print(f"  crop_y_top_img={crop_y_top_img}  crop_y_bottom_img={crop_y_bottom_img} (sollte ~H sein)")
+        print(f"  crop_y_top_img={crop_y_top_img}  crop_y_bottom_img={crop_y_bottom_img}")
         print(f"  lanes_detected={len(lanes_xy)}")
 
-    vis = cv2.imread(image_path)
+    # vis-Bild ist einfach eine Kopie des Originalframes
+    vis = frame_bgr.copy()
 
     if DEBUG:
         r_crop  = float(getattr(cfg, "crop_ratio", 1.0))
@@ -177,7 +233,8 @@ def process_image(image_path, net, cfg, img_transforms, device):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
 
         overlay = vis.copy()
-        cv2.rectangle(overlay, (0, crop_y_top_img), (W-1, min(H-1, crop_y_bottom_img)),
+        cv2.rectangle(overlay, (0, crop_y_top_img),
+                      (W-1, min(H-1, crop_y_bottom_img)),
                       (255, 0, 0), thickness=-1)
         alpha = 0.1
         vis = cv2.addWeighted(overlay, alpha, vis, 1 - alpha, 0)
@@ -191,60 +248,5 @@ def process_image(image_path, net, cfg, img_transforms, device):
         debug=DEBUG,
         lanes_info=lanes_info
     )
-    return vis
 
-if __name__ == "__main__":
-    torch.backends.cudnn.benchmark = True
-    args, cfg = merge_config()
-
-    CANON_W, CANON_H = 1640, 590
-
-    # Info zu row_anchor
-    row_anchor_np = np.array(cfg.row_anchor, dtype=float)
-    row_anchor_are_ratio = float(row_anchor_np.max()) <= 1.5
-    print(f"row_anchor max={row_anchor_np.max():.3f} ->",
-          "RATIO" if row_anchor_are_ratio else "PIXELS@590")
-
-    cfg.dataset = 'CULane'
-    cfg.batch_size = 1
-    print('DATASET =', cfg.dataset)
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    net = LaneNet(
-        pretrained=True,
-        backbone=cfg.backbone,
-        num_grid_row=cfg.num_cell_row,
-        num_cls_row=cfg.num_row,
-        num_grid_col=cfg.num_cell_col,
-        num_cls_col=cfg.num_col,
-        num_lane_on_row=cfg.num_lanes,
-        num_lane_on_col=cfg.num_lanes,
-        use_aux=cfg.use_aux,
-        input_height=cfg.train_height,
-        input_width=cfg.train_width,
-        fc_norm=cfg.fc_norm,
-    ).to(device)
-    net.eval()
-
-    state = torch.load(cfg.test_model, map_location=device)['model']
-    state = {(k[7:] if k.startswith('module.') else k): v for k, v in state.items()}
-    net.load_state_dict(state, strict=False)
-
-    img_transforms = transforms.Compose([
-        transforms.Resize((cfg.train_height, cfg.train_width)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-    ])
-
-    in_dir = "/home/konrada/projects/Uni/ProjektAutonomesFahren/Behavioural_Cloning_Basic/data/Processed/frames"
-    out_dir = "/home/konrada/projects/Uni/ProjektAutonomesFahren/Behavioural_Cloning_Basic/data/Processed/LaneDetection"
-    os.makedirs(out_dir, exist_ok=True)
-
-    for fname in os.listdir(in_dir):
-        if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
-            src = os.path.join(in_dir, fname)
-            dst = os.path.join(out_dir, fname)
-            vis = process_image(src, net, cfg, img_transforms, device)
-            cv2.imwrite(dst, vis)
-            print(f"Processed {fname} -> {dst}")
+    return vis, lanes_xy, lanes_info

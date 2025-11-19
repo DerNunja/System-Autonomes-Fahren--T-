@@ -1,5 +1,5 @@
 import torch
-from utils.common import initialize_weights
+from ..utils.common import initialize_weights
 class conv_bn_relu(torch.nn.Module):
     def __init__(self,in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1,bias=False):
         super(conv_bn_relu,self).__init__()

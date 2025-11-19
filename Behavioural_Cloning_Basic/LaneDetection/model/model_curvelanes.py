@@ -1,8 +1,8 @@
 import torch
-from model.backbone import resnet
+from .backbone import resnet
 import numpy as np
-from utils.common import initialize_weights
-from model.seg_model import SegHead
+from ..utils.common import initialize_weights
+from .seg_model import SegHead
 
 class parsingNet(torch.nn.Module):
     def __init__(self, pretrained=True, backbone='50', num_grid_row = None, num_cls_row = None, num_grid_col = None, num_cls_col = None, 

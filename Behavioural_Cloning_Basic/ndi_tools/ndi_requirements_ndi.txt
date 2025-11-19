@@ -1,3 +1,0 @@
-pylibndi
-opencv-python
-numpy
