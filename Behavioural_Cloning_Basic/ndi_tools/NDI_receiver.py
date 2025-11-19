@@ -1,5 +1,4 @@
-# ndi_receiver_mock.py
-import NDIlib as ndi
+from cyndilib import ndi
 import cv2
 import numpy as np
 import time

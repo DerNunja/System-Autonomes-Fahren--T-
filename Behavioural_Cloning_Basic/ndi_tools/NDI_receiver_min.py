@@ -1,99 +1,157 @@
-import NDIlib as ndi
 import numpy as np
-import time
+import cv2
+
+from cyndilib.wrapper.ndi_recv import RecvColorFormat
+from cyndilib.finder import Finder
+from cyndilib.receiver import Receiver, ReceiveFrameType
+from cyndilib.video_frame import VideoRecvFrame
 
 SOURCE_NAME = "Simu_Video_Feed"
-MAX_FRAMES = 10
 
 
-def main():
-    print("[NDI] initialize() ...")
-    if not ndi.initialize():
-        print("NDI konnte nicht initialisiert werden.")
-        return
-
-    print("[NDI] find_create_v2() ...")
-    finder = ndi.find_create_v2()
-    if not finder:
-        print("Fehler beim Erstellen des Finders.")
-        ndi.destroy()
-        return
+def run_receiver():
+    # 1) Quellen suchen
+    finder = Finder()
+    finder.open()
+    print(f"Suche nach NDI-Quelle, die '{SOURCE_NAME}' enthält...")
 
     source = None
     try:
-        print(f"[NDI] Suche nach Quellen, die '{SOURCE_NAME}' enthalten ...")
         while source is None:
-            ndi.find_wait_for_sources(finder, 2000)
-            sources = ndi.find_get_current_sources(finder) or []
-            names = [s.ndi_name for s in sources]
-            print("[NDI] Gefundene Quellen:", names)
+            finder.wait_for_sources(2.0)
+            names = finder.update_sources()
+            print("Gefundene Quellen:", names)
 
-            for s in sources:
-                if SOURCE_NAME in s.ndi_name:
-                    source = s
+            for name in names:
+                if SOURCE_NAME in name:
+                    source = finder.get_source(name)
                     break
-
-        print(f"[NDI] Quelle gewählt: {source.ndi_name}")
     finally:
-        print("[NDI] find_destroy()")
-        ndi.find_destroy(finder)
+        finder.close()
 
-    print("[NDI] recv_create_v3() ...")
-    recv_create = ndi.RecvCreateV3()
-    recv_create.color_format = ndi.RECV_COLOR_FORMAT_BGRX_BGRA
-    # Bandbreite hier NICHT anfassen, das Feld gibt's in V3 nicht
-    recv = ndi.recv_create_v3(recv_create)
-
-    if not recv:
-        print("Fehler beim Erstellen des NDI-Receivers.")
-        ndi.destroy()
+    if source is None:
+        print("Keine passende NDI-Quelle gefunden.")
         return
 
-    print("[NDI] recv_connect() ...")
-    ndi.recv_connect(recv, source)
+    print("Quelle gewählt:", source.name)
 
-    print(f"[NDI] Empfange bis zu {MAX_FRAMES} Video-Frames (ohne Anzeige) ...")
-    frame_count = 0
-    start_all = time.time()
+    # 2) Receiver anlegen
+    recv = Receiver(
+        source_name=source.name,
+        color_format=RecvColorFormat.BGRX_BGRA,
+    )
+
+    # explizit mit der Quelle verbinden
+    try:
+        recv.connect_to(source)
+        print("[NDI] connect_to(source) aufgerufen.")
+    except Exception as e:
+        print(f"[NDI] connect_to(source) Fehler: {e}")
+
+    # Status ausgeben
+    try:
+        connected = recv.is_connected()
+    except Exception as e:
+        connected = f"Fehler bei is_connected(): {e}"
+    try:
+        num_conns = recv.get_num_connections()
+    except Exception as e:
+        num_conns = f"Fehler bei get_num_connections(): {e}"
+
+    print(f"[NDI] is_connected: {connected}")
+    print(f"[NDI] get_num_connections: {num_conns}")
+
+    # 3) Video-Frame-Container registrieren
+    vf = VideoRecvFrame()
+    recv.set_video_frame(vf)
+
+    max_debug_frames = 15
+    num_video_frames = 0
+    saved_frame = False
 
     try:
-        while frame_count < MAX_FRAMES:
-            t, v_frame, a_frame, m_frame = ndi.recv_capture_v2(recv, 5000)
+        for i in range(max_debug_frames):
+            ft = recv.receive(ReceiveFrameType.recv_video, 2000)
+            print(f"[NDI] receive() call {i+1} -> FrameType: {ft} (int={int(ft)})")
 
-            print(f"[NDI] recv_capture_v2 -> t={t}")
+            if ft == ReceiveFrameType.nothing:
+                print("  Kein Frame (timeout).")
+                continue
 
-            if t == ndi.FRAME_TYPE_VIDEO:
-                frame_count += 1
+            if ft & ReceiveFrameType.recv_video:
+                frame_arr = vf.current_frame_data
+                if frame_arr is None:
+                    print("  current_frame_data ist None.")
+                    continue
 
-                xres = v_frame.xres
-                yres = v_frame.yres
-                frame_bgra = np.copy(v_frame.data)
+                num_video_frames += 1
 
                 print(
-                    f"[NDI][Frame {frame_count}] xres={xres}, yres={yres}, "
-                    f"shape={frame_bgra.shape}, dtype={frame_bgra.dtype}, "
-                    f"min={frame_bgra.min()}, max={frame_bgra.max()}"
+                    f"  raw frame_arr.shape={frame_arr.shape}, "
+                    f"ndim={frame_arr.ndim}, size={frame_arr.size}, dtype={frame_arr.dtype}"
                 )
 
-                ndi.recv_free_video_v2(recv, v_frame)
+                # Auflösung und ggf. Kanäle bestimmen
+                try:
+                    xres, yres = vf.get_resolution()  # (width, height)
+                except Exception as e:
+                    print(f"  get_resolution() Fehler: {e}")
+                    continue
 
-            elif t == ndi.FRAME_TYPE_NONE:
-                print("[NDI] Kein Frame (FRAME_TYPE_NONE) – Timeout ohne Daten.")
-            elif t == ndi.FRAME_TYPE_STATUS_CHANGE:
-                print("[NDI] STATUS_CHANGE (Verbindung/Format geändert)")
-            elif t == ndi.FRAME_TYPE_AUDIO:
-                print("[NDI] AUDIO-Frame (ignoriert)")
-                ndi.recv_free_audio_v2(recv, a_frame)
+                print(f"  reported resolution: xres={xres}, yres={yres}")
 
-        dur = time.time() - start_all
-        print(f"[NDI] {frame_count} Video-Frames in {dur:.2f}s empfangen.")
+                if xres <= 0 or yres <= 0:
+                    print("  Ungültige Auflösung, breche diesen Frame ab.")
+                    continue
+
+                pixels = xres * yres
+                if frame_arr.size % pixels != 0:
+                    print("  frame_arr.size passt nicht zu xres*yres, breche ab.")
+                    continue
+
+                channels = frame_arr.size // pixels
+                print(f"  abgeleitete channels={channels}")
+
+                if channels not in (1, 3, 4):
+                    print("  Unerwartete Kanalanzahl, breche ab.")
+                    continue
+
+                # reshapen
+                frame_reshaped = frame_arr.reshape((yres, xres, channels)) if channels > 1 else frame_arr.reshape((yres, xres))
+                min_val = int(frame_reshaped.min())
+                max_val = int(frame_reshaped.max())
+                print(f"  reshaped min={min_val}, max={max_val}")
+
+                if not saved_frame and frame_reshaped.size > 0:
+                    # Konvertiere ggf. BGRA -> BGR für Save
+                    if channels == 4:
+                        bgr = cv2.cvtColor(frame_reshaped, cv2.COLOR_BGRA2BGR)
+                    elif channels == 3:
+                        bgr = frame_reshaped
+                    else:
+                        bgr = frame_reshaped
+
+                    out_path = "ndi_debug_frame.png"
+                    try:
+                        cv2.imwrite(out_path, bgr)
+                        print(f"  Erste Frame-Kopie gespeichert als {out_path}")
+                        saved_frame = True
+                    except Exception as e:
+                        print(f"  Fehler beim Speichern von {out_path}: {e}")
+
+        try:
+            perf = recv.get_performance_data()
+            print(f"[NDI] Performance: {perf}")
+        except Exception as e:
+            print(f"[NDI] get_performance_data() Fehler: {e}")
 
     finally:
-        print("[NDI] Aufräumen ...")
-        ndi.recv_destroy(recv)
-        ndi.destroy()
-        print("[NDI] Fertig.")
+        if hasattr(recv, "disconnect"):
+            recv.disconnect()
+        if hasattr(recv, "destroy"):
+            recv.destroy()
+        print("Receiver beendet.")
 
 
 if __name__ == "__main__":
-    main()
+    run_receiver()
