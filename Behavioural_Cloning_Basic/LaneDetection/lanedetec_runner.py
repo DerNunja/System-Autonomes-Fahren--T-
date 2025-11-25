@@ -2,9 +2,9 @@ from PIL import Image
 import torch
 import os
 import cv2
-from .utils.common import merge_config
 import torchvision.transforms as transforms
 from .model.model_culane import parsingNet as LaneNet
+from .configs import culane_res34 as lane_cfg
 import numpy as np
 
 DEBUG = True  # globale Debug-Flag
@@ -12,18 +12,27 @@ DEBUG = True  # globale Debug-Flag
 def init_lanedetector():
     """Initialisiert Netz, Config, Transforms und Device nur einmal."""
     torch.backends.cudnn.benchmark = True
-    args, cfg = merge_config()
+    cfg = lane_cfg
 
     CANON_W, CANON_H = 1640, 590
-
-    row_anchor_np = np.array(cfg.row_anchor, dtype=float)
-    row_anchor_are_ratio = float(row_anchor_np.max()) <= 1.5
-    print(f"row_anchor max={row_anchor_np.max():.3f} ->",
-          "RATIO" if row_anchor_are_ratio else "PIXELS@590")
 
     cfg.dataset = 'CULane'
     cfg.batch_size = 1
     print('DATASET =', cfg.dataset)
+
+    if not hasattr(cfg, "row_anchor") or not hasattr(cfg, "col_anchor"):
+        if cfg.dataset == 'CULane':
+            cfg.row_anchor = np.linspace(0.42, 1.0, cfg.num_row)
+            cfg.col_anchor = np.linspace(0.0, 1.0, cfg.num_col)
+        elif cfg.dataset == 'Tusimple':
+            cfg.row_anchor = np.linspace(160, 710, cfg.num_row) / 720.0
+            cfg.col_anchor = np.linspace(0.0, 1.0, cfg.num_col)
+        elif cfg.dataset == 'CurveLanes':
+            cfg.row_anchor = np.linspace(0.4, 1.0, cfg.num_row)
+            cfg.col_anchor = np.linspace(0.0, 1.0, cfg.num_col)
+
+    if not getattr(cfg, "test_model", ""):
+        cfg.test_model = "LaneDetection/weights/culane_res34.pth"
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
