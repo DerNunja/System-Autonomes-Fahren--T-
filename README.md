@@ -52,10 +52,5 @@ Erstelle einfach ein Issue oder öffne einen Pull Request.
 
 ## Resources 
 
-
 Ultra-Fast-Lane-Detection-v2 pyTorch Implementation (verwendet in ../LaneDetection)
 https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2?tab=readme-ov-file
-
-
-## Lane Detection Issue Example
-![alt text](Pictures/LaneDetection.png)
