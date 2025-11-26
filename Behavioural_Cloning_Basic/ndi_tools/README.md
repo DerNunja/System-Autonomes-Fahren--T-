@@ -1,21 +1,27 @@
-#  NDI Videoübertragung (Sender & Empfänger)
+# NDI Video Streaming – Sender & Receiver (Lokale Simulation)
 
-Dieses Tool sendet und empfängt Videostreams über das NDI-Protokoll (Network Device Interface).
-
-**Hinweis:**
-- Die Simulation erzeugt nur Videodaten, keine Sensordaten.  
-- MQTT kann die Videoframes nicht an Perception-Module (z. B. YOLO oder Segmentierung) übertragen.
+Dieses Modul ermöglicht es, ein lokales Video über **NDI (Network Device Interface)** zu streamen und anschließend wieder zu empfangen.  
+Der Stream wird direkt an das Perception-Modell weitergeleitet und dort verarbeitet.  
+MQTT wird hier **nicht** für den Videostream genutzt, da MQTT keine Echtzeitbilddaten effizient übertragen kann.
 
 ---
 
-##  Voraussetzungen
+# Voraussetzungen
 
-1. **NDI SDK / Runtime installieren**  
-    [https://ndi.video/ndi-sdk/](https://ndi.video/ndi-sdk/)  ndi_sdk 5
-   Stelle sicher, dass die Datei  
-   `C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll`  
-   existiert.
+### Benötigte Software
+- Python **3.11**  
+- **NDI Tools** (für die lokale NDI-Engine)  
+- Python-Pakete:  
+  - `visiongraph-ndi`  
+  - `opencv-python` (cv2)
 
-2. **Python-Abhängigkeiten installieren**
-   ```bash
-   pip install -r requirements_ndi.txt
+---
+
+### Hinweis zur Ausführung
+1. **Zuerst** den NDI-Sender starten  
+2. **Dann** den NDI-Empfänger starten  
+
+Das gesamte System läuft **lokal auf einem einzigen Rechner**.  
+Ein Netzwerk ist nicht notwendig.
+
+---
