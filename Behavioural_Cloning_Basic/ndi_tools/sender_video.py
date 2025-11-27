@@ -29,7 +29,7 @@ def main():
     # Quelle öffnen
     if USE_LIVE_SOURCE:
         print(f"[INFO] Öffne Live-Quelle: {LIVE_SOURCE}")
-        cap = cv2.VideoCapture(LIVE_SOURCE)
+        cap = cv2.VideoCapture(LIVE_SOURCE, cv2.CAP_DSHOW)
     else:
         print(f"[INFO] Öffne Videodatei: {VIDEO_PATH}")
         cap = cv2.VideoCapture(VIDEO_PATH)
