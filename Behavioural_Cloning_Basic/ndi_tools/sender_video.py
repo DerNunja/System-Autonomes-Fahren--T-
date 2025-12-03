@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 from visiongraph_ndi.NDIVideoOutput import NDIVideoOutput
 
-# ========================== USER CONFIG ========================== #
+
 USE_LIVE_SOURCE = False
 
 VIDEO_PATH = "/home/konrada/projects/Uni/ProjektAutonomesFahren/Behavioural_Cloning_Basic/data/Recordings/Video/ego_h264.mp4"
@@ -12,7 +12,6 @@ LIVE_SOURCE = 0
 
 TARGET_SIZE: Optional[Tuple[int, int]] = (640, 360)
 TARGET_FPS: Optional[float] = 60.0
-# ================================================================= #
 
 
 def main():
@@ -54,7 +53,7 @@ def main():
         sum_sleep_time = 0.0
 
         while True:
-            # -------- Frame aus Quelle lesen --------
+            #  Frame aus Quelle lesen 
             read_t0 = time.time()
             ret, frame = cap.read()
             read_t1 = time.time()
@@ -69,7 +68,7 @@ def main():
                     print("[INFO] Video zu Ende.")
                     break
 
-            # -------- Resize --------
+            #  Resize 
             resize_t0 = time.time()
             if TARGET_SIZE is not None:
                 frame = cv2.resize(frame, TARGET_SIZE, interpolation=cv2.INTER_AREA)
@@ -77,7 +76,7 @@ def main():
             resize_dt = resize_t1 - resize_t0
             sum_resize_time += resize_dt
 
-            # -------- NDI-Senden --------
+            #  NDI-Senden 
             send_t0 = time.time()
             ndi.send(frame)
             send_t1 = time.time()
@@ -86,7 +85,7 @@ def main():
 
             total_frames += 1
 
-            # -------- Preview (optional) --------
+            #  Preview
             preview_t0 = time.time()
             cv2.imshow("Sender Preview", frame)
             if cv2.waitKey(1) & 0xFF == 27:  # ESC
@@ -98,7 +97,7 @@ def main():
             preview_dt = preview_t1 - preview_t0
             sum_preview_time += preview_dt
 
-            # -------- Framerate drosseln --------
+            #  Framerate drosseln 
             sleep_dt = 0.0
             if frame_time > 0:
                 next_send_time += frame_time
