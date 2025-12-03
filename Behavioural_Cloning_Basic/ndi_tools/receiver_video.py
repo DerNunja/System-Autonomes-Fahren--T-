@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from LaneDetection.lanedetec_runner import init_lanedetector, process_frame
+from World.world_model import LaneDetResult, WorldModel
 
 # Optional: Torch für GPU-Synchronisation importieren
 try:
@@ -21,6 +22,55 @@ except ImportError:
     HAS_TORCH = False
 
 
+def draw_ego_centerline(vis_bgr: np.ndarray, ego_lane) -> np.ndarray:
+    """
+    Zeichnet die Ego-Mittelspur (centerline_px) als gelbe Linie ins Bild,
+    inkl. Text mit Lateraloffset.
+    """
+    if ego_lane is None or not ego_lane.has_ego_lane:
+        return vis_bgr
+
+    if not ego_lane.centerline_px:
+        return vis_bgr
+
+    pts = np.array(ego_lane.centerline_px, dtype=np.int32).reshape(-1, 1, 2)
+    cv2.polylines(
+        vis_bgr,
+        [pts],
+        isClosed=False,
+        color=(0, 255, 255),  # gelb
+        thickness=3,
+        lineType=cv2.LINE_AA,
+    )
+
+    # Marker am unteren Punkt
+    bottom_pt = max(ego_lane.centerline_px, key=lambda p: p[1])
+    cv2.circle(
+        vis_bgr,
+        (int(bottom_pt[0]), int(bottom_pt[1])),
+        5,
+        (0, 255, 255),
+        -1,
+        lineType=cv2.LINE_AA,
+    )
+
+    # Text mit Lateraloffset
+    offset_px = ego_lane.lateral_offset_px
+    txt = f"ego_offset={offset_px:+.1f}px"
+    cv2.putText(
+        vis_bgr,
+        txt,
+        (10, 140),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    return vis_bgr
+
+
 def run_perception_models(
     bgr_frame: np.ndarray,
     net,
@@ -28,7 +78,7 @@ def run_perception_models(
     img_transforms,
     device,
     loop_fps: float | None = None,
-) -> Tuple[np.ndarray, float, int, float]:
+):
     """
     Führt LaneDetection auf einem Frame aus und zeichnet FPS ins Bild.
 
@@ -37,9 +87,9 @@ def run_perception_models(
         fps_inst:  Modell-FPS (instantan)
         n_lanes:   Anzahl detektierter Lanes
         model_dt:  Modell-Laufzeit in Sekunden (inkl. GPU + CPU, per cuda.synchronize)
+        lanes_xy:  Lane-Punkte im Modell-/Canon-Raum (x_model, y_canon)
+        lanes_info: Meta-Infos pro Lane (lane_id, score, n_points)
     """
-    # Vor dem Modell synchronisieren, damit vorherige GPU-Operationen
-    # nicht in unser Timing reinlaufen
     if HAS_TORCH and hasattr(device, "type") and device.type == "cuda":
         torch.cuda.synchronize(device)
 
@@ -47,7 +97,6 @@ def run_perception_models(
 
     vis_bgr, lanes_xy, lanes_info = process_frame(bgr_frame, net, cfg, img_transforms, device)
 
-    # Nach dem Modell wieder synchronisieren, damit wir die echte Modell-Laufzeit sehen
     if HAS_TORCH and hasattr(device, "type") and device.type == "cuda":
         torch.cuda.synchronize(device)
 
@@ -72,7 +121,7 @@ def run_perception_models(
         cv2.LINE_AA,
     )
 
-    return vis_bgr, fps_inst, n_lanes, model_dt
+    return vis_bgr, fps_inst, n_lanes, model_dt, lanes_xy, lanes_info
 
 
 def main():
@@ -112,10 +161,12 @@ def main():
         cv2.namedWindow("NDI Original", cv2.WINDOW_NORMAL)
         cv2.namedWindow("LaneDetection Stream", cv2.WINDOW_NORMAL)
 
+        wm: WorldModel | None = None  # Weltmodell-Instanz (wird lazy initialisiert)
+
         while ndi.is_connected:
             loop_t0 = time.time()
 
-            # -------- NDI / Netzwerk / Receive --------
+            #  NDI / Netzwerk / Receive 
             ndi_t0 = time.time()
             ts, frame = ndi.read()   # ts in ms (Epoch), frame = BGR (numpy)
             ndi_t1 = time.time()
@@ -123,8 +174,14 @@ def main():
             sum_ndi_read_time += ndi_dt
 
             if frame is None:
-                # hier wartet CPU „nur“ auf neue Daten
                 continue
+
+            # Bildgröße
+            H, W = frame.shape[:2]
+
+            # WorldModel beim ersten validen Frame initialisieren
+            if wm is None:
+                wm = WorldModel(img_width=W, img_height=H)
 
             # Video-Timestamps für avg_video_fps sammeln
             if ts is not None:
@@ -136,13 +193,28 @@ def main():
                     unique_ts_steps += 1
                 prev_ts_for_avg = ts
 
-            # ---------------- LaneDetection / Modell ----------------
-            vis_bgr, fps_inst, n_lanes, model_dt = run_perception_models(
+            #  LaneDetection / Modell 
+            vis_bgr, fps_inst, n_lanes, model_dt, lanes_xy, lanes_info = run_perception_models(
                 frame, net, cfg, img_transforms, device, loop_fps=None
             )
             sum_model_time += model_dt
 
-            # ---------------- Anzeige ----------------
+            #  Weltmodell aktualisieren & Ego-Mittelspur einzeichnen
+            lane_res = LaneDetResult(
+                timestamp_ms=int(ts) if ts is not None else 0,
+                img_width=W,
+                img_height=H,
+                lanes_model_xy=lanes_xy,
+                lanes_info=lanes_info,
+                model_width=cfg.train_width,
+                canon_height=590,
+            )
+            wm_state = wm.update_from_lane_detection(lane_res)
+
+            if wm_state.ego_lane is not None:
+                vis_bgr = draw_ego_centerline(vis_bgr, wm_state.ego_lane)
+
+            #  Anzeige 
             display_t0 = time.time()
             cv2.imshow("NDI Original", frame)
             cv2.imshow("LaneDetection Stream", vis_bgr)
@@ -176,7 +248,7 @@ def main():
 
         t_overall = time.time() - t_overall_start
 
-        # ---------------- Statistik-Ausgabe ----------------
+        #  Statistik-Ausgabe 
         if total_frames > 0:
             avg_loop_fps = total_frames / t_overall
             avg_ndi_ms = (sum_ndi_read_time / total_frames) * 1000.0
