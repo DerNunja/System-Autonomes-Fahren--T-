@@ -1,0 +1,10 @@
+[STATS] Processed 4072 frames in 57.18s -> avg loop FPS = 71.21
+[BREAKDOWN] avg_model_time  =  11.16 ms/frame ( 79.7% der Loop-Zeit)
+[BREAKDOWN] avg_display_time=   2.64 ms/frame ( 18.8% der Loop-Zeit)
+[BREAKDOWN] avg_loop_time   =  14.01 ms/frame (inkl. Model + Display + sonstiges)
+[VIDEO] avg_video_fps (unique ts steps) = 59.81 FPS
+
+
+Zeit: 0.698 s
+Resize Zeit: 0.271 s
+SVD Zeit: 2.445 s

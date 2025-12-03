@@ -7,12 +7,18 @@ from pathlib import Path
 from typing import Tuple
 from visiongraph_ndi.NDIVideoInput import NDIVideoInput
 
-# Projekt-Root für Imports (LaneDetection) hinzufügen
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from LaneDetection.lanedetec_runner import init_lanedetector, process_frame
+
+# Optional: Torch für GPU-Synchronisation importieren
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 
 
 def run_perception_models(
@@ -26,20 +32,24 @@ def run_perception_models(
     """
     Führt LaneDetection auf einem Frame aus und zeichnet FPS ins Bild.
 
-    Args:
-        bgr_frame: Eingangsframe (BGR).
-        net, cfg, img_transforms, device: LaneDetektor-Objekte.
-        loop_fps: instantane Loop-FPS (nur für Overlay).
-
     Returns:
         vis_bgr:   annotiertes Bild
         fps_inst:  Modell-FPS (instantan)
         n_lanes:   Anzahl detektierter Lanes
-        model_dt:  Modell-Laufzeit in Sekunden
+        model_dt:  Modell-Laufzeit in Sekunden (inkl. GPU + CPU, per cuda.synchronize)
     """
+    # Vor dem Modell synchronisieren, damit vorherige GPU-Operationen
+    # nicht in unser Timing reinlaufen
+    if HAS_TORCH and hasattr(device, "type") and device.type == "cuda":
+        torch.cuda.synchronize(device)
+
     t0 = time.time()
 
     vis_bgr, lanes_xy, lanes_info = process_frame(bgr_frame, net, cfg, img_transforms, device)
+
+    # Nach dem Modell wieder synchronisieren, damit wir die echte Modell-Laufzeit sehen
+    if HAS_TORCH and hasattr(device, "type") and device.type == "cuda":
+        torch.cuda.synchronize(device)
 
     t1 = time.time()
     model_dt = t1 - t0
@@ -88,6 +98,7 @@ def main():
         t_overall_start = time.time()
 
         # Stats / Breakdown
+        sum_ndi_read_time = 0.0
         sum_model_time = 0.0
         sum_display_time = 0.0
         sum_loop_time = 0.0
@@ -104,9 +115,15 @@ def main():
         while ndi.is_connected:
             loop_t0 = time.time()
 
+            # -------- NDI / Netzwerk / Receive --------
+            ndi_t0 = time.time()
             ts, frame = ndi.read()   # ts in ms (Epoch), frame = BGR (numpy)
+            ndi_t1 = time.time()
+            ndi_dt = ndi_t1 - ndi_t0
+            sum_ndi_read_time += ndi_dt
 
             if frame is None:
+                # hier wartet CPU „nur“ auf neue Daten
                 continue
 
             # Video-Timestamps für avg_video_fps sammeln
@@ -120,17 +137,12 @@ def main():
                 prev_ts_for_avg = ts
 
             # ---------------- LaneDetection / Modell ----------------
-            # loop_fps_inst berechnen nach der kompletten Loop; für Overlay reicht aber Näherung:
-            # Wir berechnen loop_dt am Ende und geben hier einen Dummy rein, dann wird er im nächsten Frame "korrekt".
-            # Einfacher: wir berechnen loop_fps_inst nach dem Modell-Aufruf:
-
-            # zuerst Modell aufrufen ohne loop_fps
             vis_bgr, fps_inst, n_lanes, model_dt = run_perception_models(
                 frame, net, cfg, img_transforms, device, loop_fps=None
             )
             sum_model_time += model_dt
 
-            # Anzeige
+            # ---------------- Anzeige ----------------
             display_t0 = time.time()
             cv2.imshow("NDI Original", frame)
             cv2.imshow("LaneDetection Stream", vis_bgr)
@@ -144,10 +156,14 @@ def main():
             sum_loop_time += loop_dt
             loop_fps_inst = 1.0 / loop_dt if loop_dt > 0 else 0.0
 
-            # Logging pro Frame (ohne Video-FPS-Kauderwelsch)
+            # Logging pro Frame (jetzt mit mehr Infos)
             print(
                 f"[FRAME {total_frames:05d}] "
                 f"ts={ts:13.3f} ms  "
+                f"NDI={ndi_dt*1000:5.2f} ms  "
+                f"model={model_dt*1000:5.2f} ms  "
+                f"display={display_dt*1000:5.2f} ms  "
+                f"loop={loop_dt*1000:5.2f} ms  "
                 f"model_FPS={fps_inst:5.1f}  "
                 f"loop_FPS={loop_fps_inst:5.1f}  "
                 f"lanes={n_lanes}"
@@ -163,6 +179,7 @@ def main():
         # ---------------- Statistik-Ausgabe ----------------
         if total_frames > 0:
             avg_loop_fps = total_frames / t_overall
+            avg_ndi_ms = (sum_ndi_read_time / total_frames) * 1000.0
             avg_model_ms = (sum_model_time / total_frames) * 1000.0
             avg_display_ms = (sum_display_time / total_frames) * 1000.0
             avg_loop_ms = (sum_loop_time / total_frames) * 1000.0
@@ -171,17 +188,26 @@ def main():
                 f"\n[STATS] Processed {total_frames} frames in "
                 f"{t_overall:.2f}s -> avg loop FPS = {avg_loop_fps:.2f}"
             )
+
+            # Anteile relativ zur Loop-Zeit
+            def pct(part_ms: float, total_ms: float) -> float:
+                return (part_ms / total_ms * 100.0) if total_ms > 0 else 0.0
+
             print(
-                f"[BREAKDOWN] avg_model_time  = {avg_model_ms:6.2f} ms/frame "
-                f"({avg_model_ms/avg_loop_ms*100:5.1f}% der Loop-Zeit)"
+                f"[BREAKDOWN] avg_ndi_read_time = {avg_ndi_ms:6.2f} ms/frame "
+                f"({pct(avg_ndi_ms, avg_loop_ms):5.1f}% der Loop-Zeit)"
             )
             print(
-                f"[BREAKDOWN] avg_display_time= {avg_display_ms:6.2f} ms/frame "
-                f"({avg_display_ms/avg_loop_ms*100:5.1f}% der Loop-Zeit)"
+                f"[BREAKDOWN] avg_model_time    = {avg_model_ms:6.2f} ms/frame "
+                f"({pct(avg_model_ms, avg_loop_ms):5.1f}% der Loop-Zeit)"
             )
             print(
-                f"[BREAKDOWN] avg_loop_time   = {avg_loop_ms:6.2f} ms/frame "
-                f"(inkl. Model + Display + sonstiges)"
+                f"[BREAKDOWN] avg_display_time  = {avg_display_ms:6.2f} ms/frame "
+                f"({pct(avg_display_ms, avg_loop_ms):5.1f}% der Loop-Zeit)"
+            )
+            print(
+                f"[BREAKDOWN] avg_loop_time     = {avg_loop_ms:6.2f} ms/frame "
+                f"(inkl. NDI + Model + Display + sonstiges)"
             )
 
             # globale durchschnittliche Video-FPS aus einzigartigen Timestamp-Steps
