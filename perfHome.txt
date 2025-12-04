@@ -38,6 +38,7 @@ SVD Zeit: 2.445 s
 USE_LIVE_SOURCE = True:
 RTX 4080
 Ryzen 9 7950x3D
+Modell ResNet18 
 
 /n[STATS] Sent 18432 frames in 307.30s -> effective send FPS = 59.98
 [BREAKDOWN SENDER] Durchschnitt pro Frame:
@@ -55,14 +56,14 @@ Ryzen 9 7950x3D
   crop_ratio=0.600  -> crop_top=0.400
   crop_y_top_img=144  crop_y_bottom_img=360
   lanes_detected=2
-[FRAME 27250] ts=1764840753120.000 ms  NDI= 0.00 ms  model=15.00 ms  display= 1.00 ms  loop=16.00 ms  model_FPS= 66.7  loop_FPS= 62.5  lanes=2
+[FRAME 10962] ts=1764841228016.000 ms  NDI= 0.00 ms  model=14.00 ms  display= 1.00 ms  loop=15.00 ms  model_FPS= 71.4  loop_FPS= 66.7  lanes=2
 
-[STATS] Processed 27250 frames in 558.67s -> avg loop FPS = 48.78
-[BREAKDOWN] avg_ndi_read_time =   0.10 ms/frame (  0.5% der Loop-Zeit)
-[BREAKDOWN] avg_model_time    =  18.21 ms/frame ( 89.1% der Loop-Zeit)
-[BREAKDOWN] avg_display_time  =   1.43 ms/frame (  7.0% der Loop-Zeit)
-[BREAKDOWN] avg_loop_time     =  20.44 ms/frame (inkl. NDI + Model + Display + sonstiges)
-[VIDEO] avg_video_fps (unique ts steps) = 48.75 FPS
+[STATS] Processed 10962 frames in 186.53s -> avg loop FPS = 58.77
+[BREAKDOWN] avg_ndi_read_time =   0.07 ms/frame (  0.4% der Loop-Zeit)
+[BREAKDOWN] avg_model_time    =  14.82 ms/frame ( 87.4% der Loop-Zeit)
+[BREAKDOWN] avg_display_time  =   1.44 ms/frame (  8.5% der Loop-Zeit)
+[BREAKDOWN] avg_loop_time     =  16.96 ms/frame (inkl. NDI + Model + Display + sonstiges)
+[VIDEO] avg_video_fps (unique ts steps) = 43.55 FPS
 
 Custome Benchmark:
 Zeit: 0.515 s
