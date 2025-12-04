@@ -1,4 +1,4 @@
-Debug:
+Debug Live Video = False:
 
 [STATS] Sent 3128 frames in 52.23s -> effective send FPS = 59.89
 [BREAKDOWN SENDER] Durchschnitt pro Frame:
@@ -25,9 +25,39 @@ Debug:
 [BREAKDOWN] avg_loop_time     =  13.69 ms/frame (inkl. NDI + Model + Display + sonstiges)
 [VIDEO] avg_video_fps (unique ts steps) = 59.73 FPS
 
-
 Custome Benchmark:
-
 Zeit: 0.698 s
 Resize Zeit: 0.271 s
 SVD Zeit: 2.445 s
+
+--------------------------------------------------------------------------------------------------
+
+Debug Live Video = True:
+
+[STATS] Processed 22749 frames in 411.55s -> avg loop FPS = 55.28
+[BREAKDOWN] avg_ndi_read_time =   0.11 ms/frame (  0.6% der Loop-Zeit)
+[BREAKDOWN] avg_model_time    =  16.22 ms/frame ( 90.1% der Loop-Zeit)
+[BREAKDOWN] avg_display_time  =   1.40 ms/frame (  7.8% der Loop-Zeit)
+[BREAKDOWN] avg_loop_time     =  18.01 ms/frame (inkl. NDI + Model + Display + sonstiges)
+[VIDEO] avg_video_fps (unique ts steps) = 54.52 FPS
+
+[DEBUG] Frame:
+  orig_wh=(640x360)  model_wh=(1600x320)  canon_h=590
+  sx_model_w=0.400  sy_canon_h=0.610
+  row_anchor max=1.000
+  crop_ratio=0.600  -> crop_top=0.400
+  crop_y_top_img=144  crop_y_bottom_img=360
+  lanes_detected=2
+[FRAME 22749] ts=1764832986430.000 ms  NDI= 0.00 ms  model=15.72 ms  display= 0.00 ms  loop=15.72 ms  model_FPS= 63.6  loop_FPS= 63.6  lanes=2
+
+[STATS] Processed 22749 frames in 411.55s -> avg loop FPS = 55.28
+[BREAKDOWN] avg_ndi_read_time =   0.11 ms/frame (  0.6% der Loop-Zeit)
+[BREAKDOWN] avg_model_time    =  16.22 ms/frame ( 90.1% der Loop-Zeit)
+[BREAKDOWN] avg_display_time  =   1.40 ms/frame (  7.8% der Loop-Zeit)
+[BREAKDOWN] avg_loop_time     =  18.01 ms/frame (inkl. NDI + Model + Display + sonstiges)
+[VIDEO] avg_video_fps (unique ts steps) = 54.52 FPS
+
+Custome Benchmark:
+Zeit: 0.515 s
+Resize Zeit: 0.552 s
+SVD Zeit: 4.909 s
