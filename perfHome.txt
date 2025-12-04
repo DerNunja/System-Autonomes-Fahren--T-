@@ -1,4 +1,7 @@
-Debug:
+USE_LIVE_SOURCE = False:
+RTX 4080 Super
+Ryzen 7 7700x
+
 
 [STATS] Sent 3128 frames in 52.23s -> effective send FPS = 59.89
 [BREAKDOWN SENDER] Durchschnitt pro Frame:
@@ -25,9 +28,43 @@ Debug:
 [BREAKDOWN] avg_loop_time     =  13.69 ms/frame (inkl. NDI + Model + Display + sonstiges)
 [VIDEO] avg_video_fps (unique ts steps) = 59.73 FPS
 
-
 Custome Benchmark:
-
 Zeit: 0.698 s
 Resize Zeit: 0.271 s
 SVD Zeit: 2.445 s
+
+--------------------------------------------------------------------------------------------------
+
+USE_LIVE_SOURCE = True:
+RTX 4080
+Ryzen 9 7950x3D
+
+/n[STATS] Sent 18432 frames in 307.30s -> effective send FPS = 59.98
+[BREAKDOWN SENDER] Durchschnitt pro Frame:
+  read      =   1.52 ms (  9.1% der Zeit)
+  resize    =   1.18 ms (  7.1% der Zeit)
+  send      =   6.01 ms ( 36.1% der Zeit)
+  preview   =   2.03 ms ( 12.2% der Zeit)
+  sleep     =   5.92 ms ( 35.5% der Zeit)
+  total     =  16.67 ms (gemittelte Frame-Dauer)
+  
+[DEBUG] Frame:
+  orig_wh=(640x360)  model_wh=(1600x320)  canon_h=590
+  sx_model_w=0.400  sy_canon_h=0.610
+  row_anchor max=1.000
+  crop_ratio=0.600  -> crop_top=0.400
+  crop_y_top_img=144  crop_y_bottom_img=360
+  lanes_detected=2
+[FRAME 27250] ts=1764840753120.000 ms  NDI= 0.00 ms  model=15.00 ms  display= 1.00 ms  loop=16.00 ms  model_FPS= 66.7  loop_FPS= 62.5  lanes=2
+
+[STATS] Processed 27250 frames in 558.67s -> avg loop FPS = 48.78
+[BREAKDOWN] avg_ndi_read_time =   0.10 ms/frame (  0.5% der Loop-Zeit)
+[BREAKDOWN] avg_model_time    =  18.21 ms/frame ( 89.1% der Loop-Zeit)
+[BREAKDOWN] avg_display_time  =   1.43 ms/frame (  7.0% der Loop-Zeit)
+[BREAKDOWN] avg_loop_time     =  20.44 ms/frame (inkl. NDI + Model + Display + sonstiges)
+[VIDEO] avg_video_fps (unique ts steps) = 48.75 FPS
+
+Custome Benchmark:
+Zeit: 0.515 s
+Resize Zeit: 0.552 s
+SVD Zeit: 4.909 s
