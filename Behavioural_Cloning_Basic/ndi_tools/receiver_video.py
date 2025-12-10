@@ -2,6 +2,9 @@ import cv2
 import numpy as np
 import time
 import sys
+import math 
+import json
+import paho.mqtt.client as mqtt
 
 from pathlib import Path
 from typing import Tuple
@@ -13,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from LaneDetection.lanedetec_runner import init_lanedetector, process_frame
 from World.world_model import LaneDetResult, WorldModel
+from drive.steering_controller import LateralController
 
 # Optional: Torch für GPU-Synchronisation importieren
 try:
@@ -20,6 +24,101 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+
+
+BROKER = "localhost"
+TOPIC_CMD = "control/steering_cmd"
+
+mqtt_client = mqtt.Client(client_id="lane-steer-controller")
+mqtt_client.connect(BROKER, 1883, keepalive=60)
+mqtt_client.loop_start()
+
+def draw_curvature_preview(vis_bgr: np.ndarray, ego_lane) -> np.ndarray:
+    """
+    Visualisiert curvature_preview als Pfeil:
+    - Start: unten an der Ego-Mittelspur
+    - Richtung: nach vorne (nach oben im Bild) und seitlich je nach Krümmung
+      curvature_preview > 0 => Pfeil knickt nach rechts
+      curvature_preview < 0 => Pfeil knickt nach links
+    """
+    if ego_lane is None or not ego_lane.has_ego_lane:
+        return vis_bgr
+    if not ego_lane.centerline_px:
+        return vis_bgr
+
+    H, W = vis_bgr.shape[:2]
+
+    # Punkt am unteren Ende der Centerline als Anker
+    bottom_center = max(ego_lane.centerline_px, key=lambda p: p[1])
+    x0, y0 = int(bottom_center[0]), int(bottom_center[1])
+
+    k = float(getattr(ego_lane, "curvature_preview", 0.0))
+
+    # Krümmung etwas clampen, damit der Pfeil nicht komplett aus dem Bild fliegt
+    k_clamped = max(-0.02, min(0.02, k))
+
+    # Skalierung: wie stark die Krümmung den Pfeil seitlich ablenkt
+    side_scale = 8000.0  # kannst du später feinjustieren
+    dy = -80             # Pfeil zeigt nach "vorn" (nach oben, da y nach unten wächst)
+    dx = int(k_clamped * side_scale)
+
+    x1 = x0 + dx
+    y1 = y0 + dy
+
+    # Pfeil zeichnen
+    cv2.arrowedLine(
+        vis_bgr,
+        (x0, y0),
+        (x1, y1),
+        (0, 0, 255),      # rot
+        2,
+        tipLength=0.25,
+    )
+
+    # Text mit Rohwert der Krümmung
+    txt = f"curv_prev={k:+.4f}"
+    cv2.putText(
+        vis_bgr,
+        txt,
+        (10, 230),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 0, 255),
+        2,
+    )
+
+    return vis_bgr
+
+
+def draw_steering_preview(
+    vis_bgr: np.ndarray,
+    origin: Tuple[int, int],
+    steer_cmd,
+    length_px: int = 120,
+) -> np.ndarray:
+    """
+    Zeichnet einen Preview-Pfeil basierend auf dem Lenkwinkel.
+    """
+    cx, cy = origin
+    angle = steer_cmd.steer_rad  # rad
+
+    # Fahrzeugkoordinaten: x nach vorne, y nach links
+    dx = math.sin(angle)
+    dy = -math.cos(angle)   # fürs Bild: nach unten ist +v
+
+    x2 = int(cx + dx * length_px)
+    y2 = int(cy + dy * length_px)
+
+    cv2.arrowedLine(
+        vis_bgr,
+        (cx, cy),
+        (x2, y2),
+        (0, 100, 200),
+        3,
+        tipLength=0.2,
+    )
+    return vis_bgr
+
 
 
 def draw_ego_centerline(vis_bgr: np.ndarray, ego_lane) -> np.ndarray:
@@ -162,6 +261,7 @@ def main():
         cv2.namedWindow("LaneDetection Stream", cv2.WINDOW_NORMAL)
 
         wm: WorldModel | None = None  # Weltmodell-Instanz (wird lazy initialisiert)
+        controller: LateralController | None = None
 
         while ndi.is_connected:
             loop_t0 = time.time()
@@ -182,6 +282,13 @@ def main():
             # WorldModel beim ersten validen Frame initialisieren
             if wm is None:
                 wm = WorldModel(img_width=W, img_height=H)
+                controller = LateralController(
+                    max_steer_rad=0.5,
+                    k_stanley=1.0,
+                    v_ref=20.0,
+                    k_ff=8.0,
+                    history_window_s=0.5,
+                )
 
             # Video-Timestamps für avg_video_fps sammeln
             if ts is not None:
@@ -213,6 +320,49 @@ def main():
 
             if wm_state.ego_lane is not None:
                 vis_bgr = draw_ego_centerline(vis_bgr, wm_state.ego_lane)
+
+            if wm_state.ego_lane and wm_state.ego_lane.has_ego_lane and controller is not None:
+                ego = wm_state.ego_lane
+                cmd = controller.update(
+                    offset_m=ego.lateral_offset_m,
+                    heading_error_rad=ego.heading_px_rad,
+                    curvature_preview=ego.curvature_preview,
+                )
+
+                # Steering-Pfeil
+                origin = (W // 2, int(H * 0.8))
+                vis_bgr = draw_steering_preview(vis_bgr, origin, cmd)
+
+                # Debug-Text
+                txt3 = (
+                    f"offset={ego.lateral_offset_m:+.2f} m, "
+                    f"steer={cmd.steer_rad:+.3f} rad (norm={cmd.steer_norm:+.2f}), "
+                    f"ff={cmd.ff_term:+.3f}"
+                )
+                cv2.putText(
+                    vis_bgr,
+                    txt3,
+                    (10, 200),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 200, 255),
+                    2,
+                )
+
+                payload = {
+                    "t_ms": int(ts) if ts is not None else 0,
+                    "steer_rad": cmd.steer_rad,        # ← AUTONOMES FAHREN: physischer Lenkwinkel
+                    "steer_norm": cmd.steer_norm,      # ← Falls dein Simulator -1..+1 erwartet
+                    "ff_term": cmd.ff_term,
+                    "offset_m": ego.lateral_offset_m,
+                    "heading_err_rad": ego.heading_px_rad,
+                    "curvature": ego.curvature_preview,
+                }
+
+                mqtt_client.publish(TOPIC_CMD, json.dumps(payload))   
+
+                # Krümmungs-Pfeil
+                vis_bgr = draw_curvature_preview(vis_bgr, ego)
 
             #  Anzeige 
             display_t0 = time.time()

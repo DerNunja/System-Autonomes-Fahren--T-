@@ -1,6 +1,5 @@
 from PIL import Image
 import torch
-import os
 import cv2
 import torchvision.transforms as transforms
 from .model.model_culane import parsingNet as LaneNet
@@ -66,7 +65,7 @@ def init_lanedetector():
     return net, cfg, img_transforms, device
 
 def pred2coords_mixed(pred, row_anchor, model_w, cfg,
-                      thr_row=0.75, local_width=2, topk_lanes=2, smooth_kernel=5):
+                      thr_row=0.8, local_width=2, topk_lanes=2, smooth_kernel=5):
     """
     Erzeugt Lane-Punkte im 'gemischten' Raum:
       x:   in MODEL_W-Einheiten (cfg.train_width)
@@ -80,7 +79,7 @@ def pred2coords_mixed(pred, row_anchor, model_w, cfg,
     lane_scores = exist_row_p.mean(0)                       # [L]
     picked = torch.argsort(lane_scores, descending=True)[:min(topk_lanes, L)].tolist()
 
-    VIS_CROP_TOP = -0.8   # lane detection zurück korrigieren nur wichtig für vis
+    VIS_CROP_TOP = -0.7   # lane detection zurück korrigieren nur wichtig für vis
     VIS_CROP_BOTTOM = 1.0
     VIS_CROP_RANGE = VIS_CROP_BOTTOM - VIS_CROP_TOP
     CANON_H = 590.0
@@ -103,6 +102,12 @@ def pred2coords_mixed(pred, row_anchor, model_w, cfg,
 
             probs = loc_row[inds, k, lane].softmax(0)
             x_hat = (probs * inds.float()).sum() + 0.5
+
+            x_conf = float(probs.max())                      # schmeißt unsichere punkte raus
+            point_conf = float(exist_row_p[k, lane]) * x_conf
+
+            if point_conf < 0.25:   
+                continue
 
             x = float(x_hat) / (G_r - 1) * model_w
 
@@ -204,7 +209,7 @@ def process_frame(frame_bgr, net, cfg, img_transforms, device):
         cfg.row_anchor,
         model_w=MODEL_W,
         cfg=cfg,
-        thr_row=0.72,
+        thr_row=0.8,
         local_width=2,
         topk_lanes=2,
         smooth_kernel=5

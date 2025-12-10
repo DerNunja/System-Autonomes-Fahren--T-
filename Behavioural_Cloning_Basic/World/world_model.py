@@ -1,5 +1,7 @@
-# world_model.py
 from __future__ import annotations
+from collections import deque
+import numpy as np
+
 
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
@@ -36,12 +38,15 @@ class LanePixelPolyline:
 
 @dataclass
 class EgoLaneState:
-    """Aggregierte Infos zur aktuellen Fahrspur (noch in Pixelkoordinaten)."""
+    """Aggregierte Infos zur aktuellen Fahrspur (noch in Pixelkoordinaten + grob in Metern)."""
     has_ego_lane: bool
     centerline_px: List[Point2D]   # Mittelspur als Pixel-Polyline
     lateral_offset_px: float       # Abweichung der Spurmitte von Bildmitte (u - W/2)
     heading_px_rad: float          # grobe Richtung (aus den unteren Punkten)
     quality: float                 # 0..1, z.B. mittlere Score der Spurbegrenzungen
+    lane_width_px: float = 0.0     # geschätzte Spurbreite im unteren Bereich (Pixel)
+    lateral_offset_m: float = 0.0  # Abweichung in Metern (via lane_width_px -> m)
+    curvature_preview: float = 0.0 # >0: Spur biegt nach rechts, <0: nach links
 
 
 @dataclass
@@ -54,14 +59,17 @@ class WorldModelState:
 # ---------- Weltmodell ---------- #
 
 class WorldModel:
-    """
-    Einfaches Weltmodell, das nur LaneDetection in 2D (Bildpixel) verwaltet.
-    """
-
-    def __init__(self, img_width: int, img_height: int):
+    def __init__(self, img_width: int, img_height: int, lane_width_m: float = 3.7,
+                 ema_alpha: float = 0.2):
         self.img_width = img_width
         self.img_height = img_height
+        self.lane_width_m = lane_width_m
         self.state: Optional[WorldModelState] = None
+
+        # History/Glättung
+        self.ema_alpha = ema_alpha
+        self._ema_offset_m: Optional[float] = None
+        self._ema_heading: Optional[float] = None
 
     # ----- Public API ----- #
 
@@ -111,6 +119,47 @@ class WorldModel:
 
         return lanes_px
 
+    def _estimate_curvature_from_centerline(
+        self,
+        centerline_px: List[Point2D],
+    ) -> float:
+        """
+        Sehr einfache Krümmungs-Heuristik aus der Mittelspur.
+        Sign:
+          kappa > 0  => Spur biegt nach rechts
+          kappa < 0  => Spur biegt nach links
+        """
+        if len(centerline_px) < 3:
+            return 0.0
+
+        # nach Bild-y sortieren: von oben (kleine v) nach unten (große v)
+        cl_sorted = sorted(centerline_px, key=lambda p: p[1])
+
+        # ein Fenster über die unteren ~10 Punkte nehmen
+        bottom = cl_sorted[-1]
+        window_size = min(10, len(cl_sorted))
+        top = cl_sorted[-window_size]
+
+        u_top, v_top = top
+        u_bot, v_bot = bottom
+
+        du = u_top - u_bot          # seitliche Änderung
+        dv = v_bot - v_top          # „vorwärts“ im Bild
+
+        if dv < 1e-3:
+            return 0.0
+
+        # einfache Normierung: Pixel-„Krümmung“
+        kappa_pix = du / dv   # >0: Spur wandert nach rechts, <0: nach links
+
+        # auf einen für den Regler sinnvollen Bereich skalieren
+        # (Faktor musst du ggf. anpassen)
+        kappa = 0.1 * kappa_pix
+
+        # Clamp gegen Ausreißer
+        kappa = float(np.clip(kappa, -0.02, 0.02))
+        return kappa
+
     def _estimate_ego_lane(self, lanes_px: List[LanePixelPolyline]) -> Optional[EgoLaneState]:
         """
         Sehr einfache Heuristik:
@@ -118,7 +167,7 @@ class WorldModel:
           - klassifiziere nach links/rechts relativ zum Bildzentrum
           - wähle die beste linke & rechte Lane nach Score
           - baue eine Mittelspur daraus
-        Alles noch in Pixeln.
+          - schätze Spurbreite in Pixeln und lateral_offset in Metern
         """
         if not lanes_px:
             return EgoLaneState(
@@ -127,6 +176,8 @@ class WorldModel:
                 lateral_offset_px=0.0,
                 heading_px_rad=0.0,
                 quality=0.0,
+                lane_width_px=0.0,
+                lateral_offset_m=0.0,
             )
 
         u_center = self.img_width / 2.0
@@ -146,6 +197,8 @@ class WorldModel:
                 lateral_offset_px=0.0,
                 heading_px_rad=0.0,
                 quality=0.0,
+                lane_width_px=0.0,
+                lateral_offset_m=0.0,
             )
 
         left_candidates = []
@@ -157,14 +210,18 @@ class WorldModel:
             else:
                 right_candidates.append((lane, u, v))
 
+        MIN_LANE_SCORE = 0.3 
+
         def pick_best(candidates):
             if not candidates:
                 return None
-            # Bevorzugt: hoher Score, und nah an der Bildmitte
-            return max(
+            best = max(
                 candidates,
                 key=lambda t: (t[0].score, -abs(t[1] - u_center))
             )
+            if best[0].score < MIN_LANE_SCORE:
+                return None
+            return best
 
         left_pick = pick_best(left_candidates)
         right_pick = pick_best(right_candidates)
@@ -177,10 +234,12 @@ class WorldModel:
                 lateral_offset_px=0.0,
                 heading_px_rad=0.0,
                 quality=0.0,
+                lane_width_px=0.0,
+                lateral_offset_m=0.0,
             )
 
-        left_lane = left_pick[0]
-        right_lane = right_pick[0]
+        left_lane, u_left_bottom, v_left_bottom = left_pick
+        right_lane, u_right_bottom, v_right_bottom = right_pick
 
         # Mittelspur als Mittelwert der beiden Lane-Polylines in gemeinsamen v-Bereichen
         centerline_px: List[Point2D] = self._build_centerline_from_lr(left_lane, right_lane)
@@ -192,34 +251,101 @@ class WorldModel:
                 lateral_offset_px=0.0,
                 heading_px_rad=0.0,
                 quality=0.0,
+                lane_width_px=0.0,
+                lateral_offset_m=0.0,
             )
+
 
         # Lateraloffset: Differenz zwischen Spurmitte am unteren Bildrand und Bildmitte
         bottom_center = max(centerline_px, key=lambda p: p[1])
         lateral_offset_px = bottom_center[0] - u_center
 
-        # Heading grob: Steigung zwischen unterstem und z.B. Punkt in der Mitte der Spur
+        # Spurbreite: Differenz der untersten Punkte links/rechts
+        lane_width_px = max(1e-6, abs(u_right_bottom - u_left_bottom))
+
+        # px -> m: angenommene lane_width_m / lane_width_px
+        meters_per_px = self.lane_width_m / lane_width_px
+        lateral_offset_m = lateral_offset_px * meters_per_px
+        curvature_preview = self._estimate_curvature_from_centerline(
+            centerline_px=centerline_px,
+        )
+
+        # Heading grob: Steigung zwischen unterstem und Punkt etwa Bildmitte
         if len(centerline_px) >= 2:
             p1 = bottom_center
             p2 = min(centerline_px, key=lambda p: abs(p[1] - (self.img_height * 0.5)))
             dx = p2[0] - p1[0]
             dy = p1[1] - p2[1]  # Bildschirmkoordinaten: v nach unten
-            heading_rad = 0.0
             if abs(dx) > 1e-3 and abs(dy) > 1e-3:
-                # Richtung: wie stark "dreht" die Spur
-                heading_rad = - (dx / dy)  # super grobe Proxy, kein echter Winkel
+                heading_rad = - (dx / dy)  # grober Proxy
+            else:
+                heading_rad = 0.0
         else:
             heading_rad = 0.0
 
         quality = 0.5 * (left_lane.score + right_lane.score)
 
+        # --- EMA-Glättung ---
+        alpha = self.ema_alpha
+
+        if self._ema_offset_m is None:
+            self._ema_offset_m = lateral_offset_m
+        else:
+            self._ema_offset_m = (1 - alpha) * self._ema_offset_m + alpha * lateral_offset_m
+
+        if self._ema_heading is None:
+            self._ema_heading = heading_rad
+        else:
+            self._ema_heading = (1 - alpha) * self._ema_heading + alpha * heading_rad
+
+        smooth_offset_m = self._ema_offset_m
+        smooth_heading  = self._ema_heading
+
+        if quality < 0.1 or len(centerline_px) < 5:
+            return EgoLaneState(
+                has_ego_lane=False,
+                centerline_px=[],
+                lateral_offset_px=0.0,
+                heading_px_rad=0.0,
+                quality=float(quality),
+                lane_width_px=float(lane_width_px),
+                lateral_offset_m=0.0,
+            )
+
+        # --- Steering-Preview: einfache Krümmungsabschätzung der Centerline ---
+        # Wir nehmen den untersten und einen weiter oben liegenden Punkt und schauen,
+        # wie stark die Spur "nach rechts" oder "nach links" wandert.
+        """
+        curvature_preview = 0.0
+        if len(centerline_px) >= 3:
+            # sortiert nach v (Bild y): von oben (kleine v) nach unten (große v)
+            cl_sorted = sorted(centerline_px, key=lambda p: p[1])
+            top = cl_sorted[0]
+            mid = cl_sorted[len(cl_sorted) // 2]
+            bottom = cl_sorted[-1]
+
+            # Wir interpretieren v nach unten als "nach vorne" (weg vom Auto)
+            # delta_u > 0 => Spur geht nach rechts, delta_u < 0 => nach links
+            du = top[0] - bottom[0]   # Unterschied in x von unten nach oben
+            dv = bottom[1] - top[1]   # "Vorwärts"-Distanz in Pixel
+
+            if dv > 1e-3:
+                curvature_preview = du / dv   # einfache Normierung
+
+        # (Optional: EMA auch auf curvature_preview anwenden, falls nötig)
+        """
         return EgoLaneState(
             has_ego_lane=True,
             centerline_px=centerline_px,
             lateral_offset_px=float(lateral_offset_px),
-            heading_px_rad=float(heading_rad),
+            heading_px_rad=float(smooth_heading),
             quality=float(quality),
+            lane_width_px=float(lane_width_px),
+            lateral_offset_m=float(smooth_offset_m),
+            curvature_preview=float(curvature_preview),
         )
+
+
 
     def _build_centerline_from_lr(
         self,

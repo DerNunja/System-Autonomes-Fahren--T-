@@ -7,7 +7,7 @@ from visiongraph_ndi.NDIVideoOutput import NDIVideoOutput
 
 USE_LIVE_SOURCE = False
 
-VIDEO_PATH = "/home/konrada/projects/Uni/ProjektAutonomesFahren/Behavioural_Cloning_Basic/data/Recordings/Video/ego_h264.mp4"
+VIDEO_PATH = "/home/konrada/projects/Uni/ProjektAutonomesFahren/Behavioural_Cloning_Basic/data/Recordings/Video/output_h264.mp4"
 LIVE_SOURCE = 0
 
 TARGET_SIZE: Optional[Tuple[int, int]] = (640, 360)
