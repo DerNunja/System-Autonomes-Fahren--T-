@@ -34,4 +34,5 @@ def bilder_extra(path: str, BilderMenge: int, frame_num: int, output_ordner: str
 # Züge bis Ende Februar Hausarbeit
 
 
-# Mask R-CNN, 
+# Mask R-CNN
+# GTSRB , GTSDB Datensätze von schilder
