@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import time
 import sys
-import math 
+import math
 import json
 import paho.mqtt.client as mqtt
 
@@ -25,13 +25,15 @@ try:
 except ImportError:
     HAS_TORCH = False
 
-
+# --- MQTT-Konfiguration ---
 BROKER = "localhost"
 TOPIC_CMD = "control/steering_cmd"
+TOPIC_LANESTATE = "sensor/lanestate"  # <--- NEU: für mqtt_bridge/ui_world_monitor
 
 mqtt_client = mqtt.Client(client_id="lane-steer-controller")
 mqtt_client.connect(BROKER, 1883, keepalive=60)
 mqtt_client.loop_start()
+
 
 def draw_curvature_preview(vis_bgr: np.ndarray, ego_lane) -> np.ndarray:
     """
@@ -118,7 +120,6 @@ def draw_steering_preview(
         tipLength=0.2,
     )
     return vis_bgr
-
 
 
 def draw_ego_centerline(vis_bgr: np.ndarray, ego_lane) -> np.ndarray:
@@ -266,7 +267,7 @@ def main():
         while ndi.is_connected:
             loop_t0 = time.time()
 
-            #  NDI / Netzwerk / Receive 
+            #  NDI / Netzwerk / Receive
             ndi_t0 = time.time()
             ts, frame = ndi.read()   # ts in ms (Epoch), frame = BGR (numpy)
             ndi_t1 = time.time()
@@ -300,7 +301,7 @@ def main():
                     unique_ts_steps += 1
                 prev_ts_for_avg = ts
 
-            #  LaneDetection / Modell 
+            #  LaneDetection / Modell
             vis_bgr, fps_inst, n_lanes, model_dt, lanes_xy, lanes_info = run_perception_models(
                 frame, net, cfg, img_transforms, device, loop_fps=None
             )
@@ -349,22 +350,29 @@ def main():
                     2,
                 )
 
+                # --- EXISTIERENDER Steering-Command-Publish ---
                 payload = {
                     "t_ms": int(ts) if ts is not None else 0,
-                    "steer_rad": cmd.steer_rad,        # ← AUTONOMES FAHREN: physischer Lenkwinkel
-                    "steer_norm": cmd.steer_norm,      # ← Falls dein Simulator -1..+1 erwartet
+                    "steer_rad": cmd.steer_rad,        # physischer Lenkwinkel
+                    "steer_norm": cmd.steer_norm,      # -1..+1
                     "ff_term": cmd.ff_term,
                     "offset_m": ego.lateral_offset_m,
                     "heading_err_rad": ego.heading_px_rad,
                     "curvature": ego.curvature_preview,
                 }
+                mqtt_client.publish(TOPIC_CMD, json.dumps(payload))
 
-                mqtt_client.publish(TOPIC_CMD, json.dumps(payload))   
+                # --- NEU: LaneState für mqtt_bridge / UI ---
+                lanestate_msg = {
+                    "lane_center": float(ego.lateral_offset_m),
+                    "curvature": float(ego.curvature_preview),
+                }
+                mqtt_client.publish(TOPIC_LANESTATE, json.dumps(lanestate_msg))
 
                 # Krümmungs-Pfeil
                 vis_bgr = draw_curvature_preview(vis_bgr, ego)
 
-            #  Anzeige 
+            #  Anzeige
             display_t0 = time.time()
             cv2.imshow("NDI Original", frame)
             cv2.imshow("LaneDetection Stream", vis_bgr)
@@ -378,7 +386,7 @@ def main():
             sum_loop_time += loop_dt
             loop_fps_inst = 1.0 / loop_dt if loop_dt > 0 else 0.0
 
-            # Logging pro Frame (jetzt mit mehr Infos)
+            # Logging pro Frame
             print(
                 f"[FRAME {total_frames:05d}] "
                 f"ts={ts:13.3f} ms  "
@@ -398,7 +406,7 @@ def main():
 
         t_overall = time.time() - t_overall_start
 
-        #  Statistik-Ausgabe 
+        #  Statistik-Ausgabe
         if total_frames > 0:
             avg_loop_fps = total_frames / t_overall
             avg_ndi_ms = (sum_ndi_read_time / total_frames) * 1000.0

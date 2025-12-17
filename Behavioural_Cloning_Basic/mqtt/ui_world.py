@@ -9,7 +9,7 @@ from tkinter import ttk
 import paho.mqtt.client as mqtt
 
 BROKER = "localhost"
-TOPIC_WORLD_STATE = "world/state"
+TOPIC_WORLD_STATE = "sensor/lanestate"
 
 # Queue für Thread-sichere Übergabe MQTT → GUI
 message_queue = queue.Queue()
