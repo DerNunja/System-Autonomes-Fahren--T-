@@ -10,9 +10,12 @@ import paho.mqtt.client as mqtt
 import vgamepad as vg
 
 # ----------------- Config -----------------
-BROKER = "127.0.0.1"          # <- Simulator-PC: lokal; oder IP vom Broker
+BROKER = ""          # <- Simulator-PC: lokal; oder IP vom Broker
 PORT = 1883
 TOPIC = "control/steering_cmd"
+
+DEBUG_PRINT = True
+DEBUG_PRINT_HZ = 10.0   # max. Prints pro Sekunde
 
 # Stick-Mapping
 # steer_norm: -1..+1  -> LeftStickX: -1..+1
@@ -35,6 +38,7 @@ BRAKE_TOPIC_FIELD = "brake_norm"
 class State:
     last_msg_t: float = 0.0
     steer_ema: float = 0.0
+    last_print_t: float = 0.0
 
 state = State()
 
@@ -80,27 +84,35 @@ def on_message(client, userdata, msg):
         print("[MQTT] bad json:", e)
         return
 
-    # ---- steering ----
     if "steer_norm" not in payload:
         return
 
-    steer = float(payload["steer_norm"])
+    steer_raw = float(payload["steer_norm"])
 
-    # Validieren/Clamp/Gain
-    steer = clamp(steer * STEER_GAIN, -STEER_MAX, STEER_MAX)
-    steer = apply_deadzone(steer, STEER_DEADZONE)
+    # Gain + Clamp
+    steer_clamped = clamp(steer_raw * STEER_GAIN, -STEER_MAX, STEER_MAX)
 
-    # Glätten
-    state.steer_ema = ema(state.steer_ema, steer, EMA_ALPHA)
+    # Deadzone
+    steer_dz = apply_deadzone(steer_clamped, STEER_DEADZONE)
 
-    # Anwenden
+    # EMA
+    state.steer_ema = ema(state.steer_ema, steer_dz, EMA_ALPHA)
+
+    # Anwenden auf Controller
     set_steer(state.steer_ema)
 
-    # Optional Gas/Bremse
-    if ENABLE_THROTTLE:
-        thr = float(payload.get(THROTTLE_TOPIC_FIELD, 0.0))
-        brk = float(payload.get(BRAKE_TOPIC_FIELD, 0.0))
-        set_triggers(thr, brk)
+    # ---------- DEBUG PRINT ----------
+    if DEBUG_PRINT:
+        now = time.time()
+        if now - state.last_print_t > 1.0 / DEBUG_PRINT_HZ:
+            print(
+                f"[STEER] raw={steer_raw:+.3f}  "
+                f"clamp={steer_clamped:+.3f}  "
+                f"deadzone={steer_dz:+.3f}  "
+                f"EMA={state.steer_ema:+.3f}"
+            )
+            state.last_print_t = now
+    # ---------------------------------
 
     state.last_msg_t = time.time()
 
