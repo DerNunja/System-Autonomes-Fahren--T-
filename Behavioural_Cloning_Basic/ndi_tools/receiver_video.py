@@ -2,6 +2,9 @@ import cv2
 import numpy as np
 import time
 import sys
+import math
+import json
+import paho.mqtt.client as mqtt
 
 from pathlib import Path
 from typing import Tuple
@@ -12,6 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from LaneDetection.lanedetec_runner import init_lanedetector, process_frame
+from World.world_model import LaneDetResult, WorldModel
+from drive.steering_controller import LateralController
 
 # Optional: Torch für GPU-Synchronisation importieren
 try:
@@ -19,6 +24,151 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+
+# --- MQTT-Konfiguration ---
+BROKER = "localhost"
+TOPIC_CMD = "control/steering_cmd"
+TOPIC_LANESTATE = "sensor/lanestate"  # <--- NEU: für mqtt_bridge/ui_world_monitor
+
+mqtt_client = mqtt.Client(client_id="lane-steer-controller")
+mqtt_client.connect(BROKER, 1883, keepalive=60)
+mqtt_client.loop_start()
+
+
+def draw_curvature_preview(vis_bgr: np.ndarray, ego_lane) -> np.ndarray:
+    """
+    Visualisiert curvature_preview als Pfeil:
+    - Start: unten an der Ego-Mittelspur
+    - Richtung: nach vorne (nach oben im Bild) und seitlich je nach Krümmung
+      curvature_preview > 0 => Pfeil knickt nach rechts
+      curvature_preview < 0 => Pfeil knickt nach links
+    """
+    if ego_lane is None or not ego_lane.has_ego_lane:
+        return vis_bgr
+    if not ego_lane.centerline_px:
+        return vis_bgr
+
+    H, W = vis_bgr.shape[:2]
+
+    # Punkt am unteren Ende der Centerline als Anker
+    bottom_center = max(ego_lane.centerline_px, key=lambda p: p[1])
+    x0, y0 = int(bottom_center[0]), int(bottom_center[1])
+
+    k = float(getattr(ego_lane, "curvature_preview", 0.0))
+
+    # Krümmung etwas clampen, damit der Pfeil nicht komplett aus dem Bild fliegt
+    k_clamped = max(-0.02, min(0.02, k))
+
+    # Skalierung: wie stark die Krümmung den Pfeil seitlich ablenkt
+    side_scale = 8000.0  # kannst du später feinjustieren
+    dy = -80             # Pfeil zeigt nach "vorn" (nach oben, da y nach unten wächst)
+    dx = int(k_clamped * side_scale)
+
+    x1 = x0 + dx
+    y1 = y0 + dy
+
+    # Pfeil zeichnen
+    cv2.arrowedLine(
+        vis_bgr,
+        (x0, y0),
+        (x1, y1),
+        (0, 0, 255),      # rot
+        2,
+        tipLength=0.25,
+    )
+
+    # Text mit Rohwert der Krümmung
+    txt = f"curv_prev={k:+.4f}"
+    cv2.putText(
+        vis_bgr,
+        txt,
+        (10, 230),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 0, 255),
+        2,
+    )
+
+    return vis_bgr
+
+
+def draw_steering_preview(
+    vis_bgr: np.ndarray,
+    origin: Tuple[int, int],
+    steer_cmd,
+    length_px: int = 120,
+) -> np.ndarray:
+    """
+    Zeichnet einen Preview-Pfeil basierend auf dem Lenkwinkel.
+    """
+    cx, cy = origin
+    angle = steer_cmd.steer_rad  # rad
+
+    # Fahrzeugkoordinaten: x nach vorne, y nach links
+    dx = math.sin(angle)
+    dy = -math.cos(angle)   # fürs Bild: nach unten ist +v
+
+    x2 = int(cx + dx * length_px)
+    y2 = int(cy + dy * length_px)
+
+    cv2.arrowedLine(
+        vis_bgr,
+        (cx, cy),
+        (x2, y2),
+        (0, 100, 200),
+        3,
+        tipLength=0.2,
+    )
+    return vis_bgr
+
+
+def draw_ego_centerline(vis_bgr: np.ndarray, ego_lane) -> np.ndarray:
+    """
+    Zeichnet die Ego-Mittelspur (centerline_px) als gelbe Linie ins Bild,
+    inkl. Text mit Lateraloffset.
+    """
+    if ego_lane is None or not ego_lane.has_ego_lane:
+        return vis_bgr
+
+    if not ego_lane.centerline_px:
+        return vis_bgr
+
+    pts = np.array(ego_lane.centerline_px, dtype=np.int32).reshape(-1, 1, 2)
+    cv2.polylines(
+        vis_bgr,
+        [pts],
+        isClosed=False,
+        color=(0, 255, 255),  # gelb
+        thickness=3,
+        lineType=cv2.LINE_AA,
+    )
+
+    # Marker am unteren Punkt
+    bottom_pt = max(ego_lane.centerline_px, key=lambda p: p[1])
+    cv2.circle(
+        vis_bgr,
+        (int(bottom_pt[0]), int(bottom_pt[1])),
+        5,
+        (0, 255, 255),
+        -1,
+        lineType=cv2.LINE_AA,
+    )
+
+    # Text mit Lateraloffset
+    offset_px = ego_lane.lateral_offset_px
+    txt = f"ego_offset={offset_px:+.1f}px"
+    cv2.putText(
+        vis_bgr,
+        txt,
+        (10, 140),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    return vis_bgr
 
 
 def run_perception_models(
@@ -28,7 +178,7 @@ def run_perception_models(
     img_transforms,
     device,
     loop_fps: float | None = None,
-) -> Tuple[np.ndarray, float, int, float]:
+):
     """
     Führt LaneDetection auf einem Frame aus und zeichnet FPS ins Bild.
 
@@ -37,9 +187,9 @@ def run_perception_models(
         fps_inst:  Modell-FPS (instantan)
         n_lanes:   Anzahl detektierter Lanes
         model_dt:  Modell-Laufzeit in Sekunden (inkl. GPU + CPU, per cuda.synchronize)
+        lanes_xy:  Lane-Punkte im Modell-/Canon-Raum (x_model, y_canon)
+        lanes_info: Meta-Infos pro Lane (lane_id, score, n_points)
     """
-    # Vor dem Modell synchronisieren, damit vorherige GPU-Operationen
-    # nicht in unser Timing reinlaufen
     if HAS_TORCH and hasattr(device, "type") and device.type == "cuda":
         torch.cuda.synchronize(device)
 
@@ -47,7 +197,6 @@ def run_perception_models(
 
     vis_bgr, lanes_xy, lanes_info = process_frame(bgr_frame, net, cfg, img_transforms, device)
 
-    # Nach dem Modell wieder synchronisieren, damit wir die echte Modell-Laufzeit sehen
     if HAS_TORCH and hasattr(device, "type") and device.type == "cuda":
         torch.cuda.synchronize(device)
 
@@ -72,7 +221,7 @@ def run_perception_models(
         cv2.LINE_AA,
     )
 
-    return vis_bgr, fps_inst, n_lanes, model_dt
+    return vis_bgr, fps_inst, n_lanes, model_dt, lanes_xy, lanes_info
 
 
 def main():
@@ -112,10 +261,13 @@ def main():
         cv2.namedWindow("NDI Original", cv2.WINDOW_NORMAL)
         cv2.namedWindow("LaneDetection Stream", cv2.WINDOW_NORMAL)
 
+        wm: WorldModel | None = None  # Weltmodell-Instanz (wird lazy initialisiert)
+        controller: LateralController | None = None
+
         while ndi.is_connected:
             loop_t0 = time.time()
 
-            # -------- NDI / Netzwerk / Receive --------
+            #  NDI / Netzwerk / Receive
             ndi_t0 = time.time()
             ts, frame = ndi.read()   # ts in ms (Epoch), frame = BGR (numpy)
             ndi_t1 = time.time()
@@ -123,8 +275,21 @@ def main():
             sum_ndi_read_time += ndi_dt
 
             if frame is None:
-                # hier wartet CPU „nur“ auf neue Daten
                 continue
+
+            # Bildgröße
+            H, W = frame.shape[:2]
+
+            # WorldModel beim ersten validen Frame initialisieren
+            if wm is None:
+                wm = WorldModel(img_width=W, img_height=H)
+                controller = LateralController(
+                    max_steer_rad=0.5,
+                    k_stanley=1.0,
+                    v_ref=20.0,
+                    k_ff=8.0,
+                    history_window_s=0.5,
+                )
 
             # Video-Timestamps für avg_video_fps sammeln
             if ts is not None:
@@ -136,13 +301,78 @@ def main():
                     unique_ts_steps += 1
                 prev_ts_for_avg = ts
 
-            # ---------------- LaneDetection / Modell ----------------
-            vis_bgr, fps_inst, n_lanes, model_dt = run_perception_models(
+            #  LaneDetection / Modell
+            vis_bgr, fps_inst, n_lanes, model_dt, lanes_xy, lanes_info = run_perception_models(
                 frame, net, cfg, img_transforms, device, loop_fps=None
             )
             sum_model_time += model_dt
 
-            # ---------------- Anzeige ----------------
+            #  Weltmodell aktualisieren & Ego-Mittelspur einzeichnen
+            lane_res = LaneDetResult(
+                timestamp_ms=int(ts) if ts is not None else 0,
+                img_width=W,
+                img_height=H,
+                lanes_model_xy=lanes_xy,
+                lanes_info=lanes_info,
+                model_width=cfg.train_width,
+                canon_height=590,
+            )
+            wm_state = wm.update_from_lane_detection(lane_res)
+
+            if wm_state.ego_lane is not None:
+                vis_bgr = draw_ego_centerline(vis_bgr, wm_state.ego_lane)
+
+            if wm_state.ego_lane and wm_state.ego_lane.has_ego_lane and controller is not None:
+                ego = wm_state.ego_lane
+                cmd = controller.update(
+                    offset_m=ego.lateral_offset_m,
+                    heading_error_rad=ego.heading_px_rad,
+                    curvature_preview=ego.curvature_preview,
+                )
+
+                # Steering-Pfeil
+                origin = (W // 2, int(H * 0.8))
+                vis_bgr = draw_steering_preview(vis_bgr, origin, cmd)
+
+                # Debug-Text
+                txt3 = (
+                    f"offset={ego.lateral_offset_m:+.2f} m, "
+                    f"steer={cmd.steer_rad:+.3f} rad (norm={cmd.steer_norm:+.2f}), "
+                    f"ff={cmd.ff_term:+.3f}"
+                )
+                cv2.putText(
+                    vis_bgr,
+                    txt3,
+                    (10, 200),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 200, 255),
+                    2,
+                )
+
+                # --- EXISTIERENDER Steering-Command-Publish ---
+                payload = {
+                    "t_ms": int(ts) if ts is not None else 0,
+                    "steer_rad": cmd.steer_rad,        # physischer Lenkwinkel
+                    "steer_norm": cmd.steer_norm,      # -1..+1
+                    "ff_term": cmd.ff_term,
+                    "offset_m": ego.lateral_offset_m,
+                    "heading_err_rad": ego.heading_px_rad,
+                    "curvature": ego.curvature_preview,
+                }
+                mqtt_client.publish(TOPIC_CMD, json.dumps(payload))
+
+                # --- NEU: LaneState für mqtt_bridge / UI ---
+                lanestate_msg = {
+                    "lane_center": float(ego.lateral_offset_m),
+                    "curvature": float(ego.curvature_preview),
+                }
+                mqtt_client.publish(TOPIC_LANESTATE, json.dumps(lanestate_msg))
+
+                # Krümmungs-Pfeil
+                vis_bgr = draw_curvature_preview(vis_bgr, ego)
+
+            #  Anzeige
             display_t0 = time.time()
             cv2.imshow("NDI Original", frame)
             cv2.imshow("LaneDetection Stream", vis_bgr)
@@ -156,7 +386,7 @@ def main():
             sum_loop_time += loop_dt
             loop_fps_inst = 1.0 / loop_dt if loop_dt > 0 else 0.0
 
-            # Logging pro Frame (jetzt mit mehr Infos)
+            # Logging pro Frame
             print(
                 f"[FRAME {total_frames:05d}] "
                 f"ts={ts:13.3f} ms  "
@@ -176,7 +406,7 @@ def main():
 
         t_overall = time.time() - t_overall_start
 
-        # ---------------- Statistik-Ausgabe ----------------
+        #  Statistik-Ausgabe
         if total_frames > 0:
             avg_loop_fps = total_frames / t_overall
             avg_ndi_ms = (sum_ndi_read_time / total_frames) * 1000.0
