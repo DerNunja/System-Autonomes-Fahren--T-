@@ -1,28 +1,28 @@
-# Weltmodell.py
+import cv2 as cv
+from ultralytics import YOLO
+import os
+from datetime import datetime
 import time
 import uuid
 from typing import Dict, Any, List, Optional
 
+
+# =========================
+# 🌍 WELTMODELL
+# =========================
 class Weltmodell:
-    """
-    Lightweight world model for highway scenarios.
-    Tracks:
-      - ego state (position, speed, heading)
-      - static objects
-      - traffic signs
-      - traffic lights
-      - lane information (updated externally)
-    """
 
     def __init__(self, lane_detector: Optional[Any] = None):
-        # Ego vehicle state
-        self.ego = {"position": (0.0, 0.0), "geschwindigkeit": 0.0, "richtung": 0.0, "lenkwinkel": 0.0}
-        # Static infrastructure
-        self.statische_objekte: Dict[str, Dict[str, Any]] = {}
-        # Signs and traffic lights
+        self.ego = {
+            "position": (0.0, 0.0),
+            "geschwindigkeit": 0.0,
+            "richtung": 0.0,
+            "lenkwinkel": 0.0
+        }
+
         self.schilder: Dict[str, Dict[str, Any]] = {}
         self.ampeln: Dict[str, Dict[str, Any]] = {}
-        # Lane information
+
         self.lane_info: Dict[str, Any] = {
             'curvature_m': None,
             'lateral_offset_m': None,
@@ -31,11 +31,9 @@ class Weltmodell:
             'right_fit': None,
             'last_update': None
         }
+
         self.lane_detector = lane_detector
 
-    # -----------------------
-    # --- Helpers ---
-    # -----------------------
     def _new_id(self, prefix: str) -> str:
         return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
@@ -43,81 +41,144 @@ class Weltmodell:
         obj_id = self._new_id("schild")
         self.schilder[obj_id] = {
             'id': obj_id,
-            'typ': 'schild',
             'label': label,
             'position': position,
-            'score': float(score),
+            'score': score,
             'timestamp': time.time()
         }
-        return obj_id
 
     def add_ampel(self, position, state: str, score: float = 1.0):
         obj_id = self._new_id("ampel")
         self.ampeln[obj_id] = {
             'id': obj_id,
-            'typ': 'ampel',
             'state': state,
             'position': position,
-            'score': float(score),
+            'score': score,
             'timestamp': time.time()
         }
-        return obj_id
-
-    def update_lane_info(self, lane_result: Optional[Any]):
-        if lane_result is None:
-            return
-        self.lane_info.update({
-            'curvature_m': float(getattr(lane_result, 'curvature_m', None)),
-            'lateral_offset_m': float(getattr(lane_result, 'lateral_offset_m', None)),
-            'confidence': float(getattr(lane_result, 'confidence', 0.0)),
-            'left_fit': getattr(lane_result, 'left_fit', None),
-            'right_fit': getattr(lane_result, 'right_fit', None),
-            'last_update': time.time()
-        })
 
     def update_from_vision(self, detections: List[Dict[str, Any]]):
-        """
-        Update world model with pre-computed detections.
-        Each detection: {'box':[x1,y1,x2,y2], 'score':float, 'class_name':str}
-        """
         for d in detections:
             cname = d.get('class_name', '').lower()
-            box = d.get('box', [0, 0, 0, 0])
-            x1, y1, x2, y2 = box
-            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-            position = (float(cx), float(cy))
-            score = float(d.get('score', 0.0))
+            x1, y1, x2, y2 = d.get('box', [0, 0, 0, 0])
+
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            position = (cx, cy)
+            score = d.get('score', 0.0)
 
             if 'light' in cname or 'ampel' in cname:
                 state = 'unknown'
-                if 'red' in cname: state='red'
-                elif 'green' in cname: state='green'
-                elif 'yellow' in cname or 'amber' in cname: state='yellow'
-                self.add_ampel(position=position, state=state, score=score)
-            elif 'sign' in cname or 'schild' in cname or 'speed' in cname:
-                self.add_schild(position=position, label=cname, score=score)
+                if 'red' in cname:
+                    state = 'red'
+                elif 'green' in cname:
+                    state = 'green'
+                elif 'yellow' in cname:
+                    state = 'yellow'
 
-    # -----------------------
-    # --- Utilities ---
-    # -----------------------
-    def get_summary(self) -> Dict[str, Any]:
-        return {
-            'ego': self.ego.copy(),
-            'lane_info': self.lane_info.copy(),
-            'anzahl_schilder': len(self.schilder),
-            'anzahl_ampeln': len(self.ampeln),
-            'schilder': list(self.schilder.values()),
-            'ampeln': list(self.ampeln.values())
-        }
+                self.add_ampel(position, state, score)
+
+            elif 'sign' in cname or 'speed' in cname:
+                self.add_schild(position, cname, score)
 
     def print_state(self):
-        print("=== 🌍 Weltmodell-Status ===")
-        print(f"Ego-Fahrzeug: {self.ego}")
-        print(f"Lane confidence: {self.lane_info.get('confidence')}, curvature: {self.lane_info.get('curvature_m')}, offset: {self.lane_info.get('lateral_offset_m')}")
-        print(f"Anzahl Schilder: {len(self.schilder)}")
-        for o in self.schilder.values(): 
-            print(f"  - {o['label']} @ {o['position']} (score: {o['score']:.2f})")
-        print(f"Anzahl Ampeln: {len(self.ampeln)}")
-        for o in self.ampeln.values(): 
-            print(f"  - {o['state']} @ {o['position']} (score: {o['score']:.2f})")
-        print("==============================================")
+        print("\n=== 🌍 Weltmodell ===")
+        print(f"Schilder: {len(self.schilder)} | Ampeln: {len(self.ampeln)}")
+
+
+# =========================
+# 🔄 YOLO → DETECTIONS
+# =========================
+def yolo_to_detections(results):
+    detections = []
+
+    for r in results:
+        boxes = r.boxes
+
+        for box in boxes:
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            score = float(box.conf[0])
+            cls_id = int(box.cls[0])
+            class_name = r.names[cls_id]
+
+            detections.append({
+                "box": [x1, y1, x2, y2],
+                "score": score,
+                "class_name": class_name
+            })
+
+    return detections
+
+
+# =========================
+# 🎥 LIVE YOLO + WELTMODELL
+# =========================
+def live_YOLO(model_path, source, gpu=True, skip_frame=1):
+    model = YOLO(model_path)
+
+    if gpu:
+        model.to("cuda")
+
+    weltmodell = Weltmodell()
+
+    cap = cv.VideoCapture(source)
+    frame_count = 0
+    paused = False
+
+    # Screenshot folder
+    save_dir = "screenshots"
+    os.makedirs(save_dir, exist_ok=True)
+
+    while cap.isOpened():
+
+        if not paused:
+            ret, frame = cap.read()
+            if not ret:
+                print("Stream ended")
+                break
+
+            frame_count += 1
+
+            if frame_count % skip_frame != 0:
+                display_frame = frame
+            else:
+                results = model(frame, conf=0.5, verbose=False)
+
+                # 🔥 Update Weltmodell
+                detections = yolo_to_detections(results)
+                weltmodell.update_from_vision(detections)
+
+                # Debug output every 30 frames
+                if frame_count % 30 == 0:
+                    weltmodell.print_state()
+
+                display_frame = results[0].plot()
+
+            cv.imshow("YOLO Live", display_frame)
+
+        key = cv.waitKey(30) & 0xFF
+
+        if key == ord("q"):
+            print("Exit")
+            break
+
+        elif key == ord("p"):
+            paused = not paused
+            print("Paused:", paused)
+
+        elif key == ord("s"):
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"{save_dir}/frame_{frame_count}_{timestamp}.png"
+            cv.imwrite(filename, display_frame)
+            print(f"Saved: {filename}")
+
+    cap.release()
+    cv.destroyAllWindows()
+
+
+# =========================
+# 🚀 RUN
+# =========================
+model_path = r"C:\Users\Zayd Maatouf\Documents\5 Semester\runs\detect\train11\weights\best.pt"
+source = r"C:\Users\Zayd Maatouf\Downloads\2026-03-25 10-22-03.mp4"
+
+live_YOLO(model_path, source, gpu=True, skip_frame=1)
