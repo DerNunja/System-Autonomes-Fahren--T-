@@ -1,52 +1,90 @@
-# detect_objects.py
-import cv2
+import cv2 as cv
 from ultralytics import YOLO
-from typing import List, Dict, Any
+import os
+from datetime import datetime
 
-def run_yolo(image_path: str, model_path: str = "yolov12s.pt", conf_thresh: float = 0.25) -> List[Dict[str, Any]]:
-    """
-    Run YOLOv12 on an image and return detections in Weltmodell format.
-    Each detection: {'box':[x1,y1,x2,y2], 'score':float, 'class_name':str}
-    """
+# bei model bitte pfad zu Gewichte eingeben
+
+model = r"C:\Users\Zayd Maatouf\Documents\5 Semester\runs\detect\train11\weights\best.pt"
+source = r"C:\Users\Zayd Maatouf\Downloads\2026-03-25 10-22-03.mp4"
+
+def live_YOLO(model_path, source, gpu: bool, skip_frame: int):
     model = YOLO(model_path)
-    img_bgr = cv2.imread(image_path)
-    if img_bgr is None:
-        raise FileNotFoundError(f"Image not found: {image_path}")
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-    results = model.predict(img_rgb, conf=conf_thresh, verbose=False)
-    detections = []
+    if gpu:
+        model.to("cuda")
 
-    for r in results:
-        if not hasattr(r, 'boxes') or r.boxes is None:
-            continue
-        for b in r.boxes:
-            try:
-                xyxy = b.xyxy[0].tolist()
-                x1, y1, x2, y2 = float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
-                score = float(b.conf[0])
-                class_name = str(b.cls[0])  # numeric by default
-                if hasattr(b, 'names'):
-                    class_name = b.names[int(b.cls[0])]
-                detections.append({
-                    'box': [x1, y1, x2, y2],
-                    'score': score,
-                    'class_name': class_name
-                })
-            except Exception:
-                continue
-    return detections
+    frame_count = 0
+    cap = cv.VideoCapture(source)
 
-if __name__ == "__main__":
-    # simple CLI test
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--image", type=str, required=True)
-    parser.add_argument("--model", type=str, default="yolov12s.pt")
-    parser.add_argument("--conf", type=float, default=0.25)
-    args = parser.parse_args()
+    paused = False
 
-    dets = run_yolo(args.image, args.model, args.conf)
-    print(f"Detections ({len(dets)}):")
-    for d in dets:
-        print(d)
+    # Ordner für Screenshots
+    save_dir = "screenshots"
+    os.makedirs(save_dir, exist_ok=True)
+
+    while cap.isOpened():
+        if not paused:
+            ret, frame = cap.read()
+            if not ret:
+                print("Can't receive frame (stream end?). Exiting ...")
+                break
+
+            frame_count += 1
+
+            if frame_count % skip_frame != 0:
+                display_frame = frame
+            else:
+                results = model(frame, conf=0.5, verbose=False)
+                display_frame = results[0].plot()
+
+            cv.imshow("frame", display_frame)
+
+        key = cv.waitKey(30) & 0xFF
+
+        if key == ord("q"):
+            print("Programm beendet")
+            break
+
+        elif key == ord("p"):
+            paused = not paused
+            print("Pause:", paused)
+
+        elif key == ord("s"):
+            # Screenshot speichern
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"{save_dir}/frame_{frame_count}_{timestamp}.png"
+            cv.imwrite(filename, display_frame)
+            print(f"Screenshot gespeichert: {filename}")
+
+    cap.release()
+    cv.destroyAllWindows()
+    
+    
+def yolo_(model, source, frame_num: int):
+    model = YOLO(model)
+    cap = cv.VideoCapture(source)
+    frame_count = 0
+    while cap.isOpened():
+        ret, frame = cap.read()
+        frame_count += 1
+        if not ret:
+            print("Can't receive frame (stream end?). Exiting ...")
+            break
+
+        if frame_count % frame_num:
+            vorhersage = model(frame)          # vorhersagen
+            print("Frame Anzahl:" %frame_count)
+
+
+        if 0xFF == ord("q"):    # mit taste q ausschalten
+            break
+
+    
+    
+    cap.release()
+
+
+
+
+live_YOLO(model, source=source, gpu=True, skip_frame=1)
