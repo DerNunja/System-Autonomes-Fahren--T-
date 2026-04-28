@@ -145,15 +145,6 @@ def get_work_dir(cfg):
     work_dir = os.path.join(cfg.log_path, now + hyper_param_str + cfg.note)
     return work_dir
 
-def get_logger(work_dir, cfg):
-    logger = DistSummaryWriter(work_dir)
-    config_txt = os.path.join(work_dir, 'cfg.txt')
-    if is_main_process():
-        with open(config_txt, 'w') as fp:
-            fp.write(str(cfg))
-
-    return logger
-
 def initialize_weights(*models):
     for model in models:
         real_init_weights(model)
