@@ -1,0 +1,16 @@
+[project]
+name = "projektautonomesfahren"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "addict>=2.4.0",
+    "numpy>=2.2.6",
+    "opencv-python>=4.13.0.92",
+    "pandas>=2.3.3",
+    "pathspec>=1.1.1",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+    "visiongraph-ndi>=0.2.0",
+]

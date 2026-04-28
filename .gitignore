@@ -62,6 +62,7 @@ cover/
 # Documentation
 docs/_build/
 site/
+docs.md
 
 #Roh-Daten
 Behavioural_Cloning_Basic/data/Recordings/Video/
