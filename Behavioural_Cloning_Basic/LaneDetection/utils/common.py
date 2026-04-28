@@ -3,7 +3,7 @@ try:
     from data.dali_data import TrainCollect  # nur fürs Training nötig
 except Exception:
     TrainCollect = None  
-from .dist_utils import get_rank, get_world_size, is_main_process, dist_print, DistSummaryWriter
+from .dist_utils import get_rank, get_world_size, is_main_process, dist_print
 from .config import Config
 import torch
 import time
