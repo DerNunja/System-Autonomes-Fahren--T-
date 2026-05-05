@@ -2,6 +2,7 @@ from PIL import Image
 import torch
 import cv2
 import torchvision.transforms as transforms
+from pathlib import Path
 from .model.model_culane import parsingNet as LaneNet
 from .configs.culane_res34 import (
     num_row, num_col, train_width, train_height,
@@ -16,8 +17,6 @@ VIS_CROP_RANGE = 1.0 - VIS_CROP_TOP
 
 def init_lanedetector():
     """Initialisiert Netz, Config, Transforms und Device einmalig."""
-    torch.backends.cudnn.benchmark = True
-
     row_anchor = np.linspace(0.42, 1.0, num_row)
     col_anchor = np.linspace(0.0, 1.0, num_col)
 
@@ -39,7 +38,26 @@ def init_lanedetector():
     ).to(device)
     net.eval()
 
-    state = torch.load("LaneDetection/weights/culane_res34.pth", map_location=device)['model']
+    weight_path = Path(__file__).resolve().parent / "weights" / "culane_res34.pth"
+    if not weight_path.exists():
+        raise FileNotFoundError(
+            f"Model weights not found at '{weight_path}'. "
+            f"Make sure culane_res34.pth is in LaneDetection/weights/"
+        )
+    try:
+        checkpoint = torch.load(weight_path, map_location=device, weights_only=False)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load model weights from '{weight_path}': {e}") from e
+
+    if isinstance(checkpoint, dict) and 'model' in checkpoint:
+        state = checkpoint['model']
+    elif isinstance(checkpoint, dict):
+        state = checkpoint
+    else:
+        raise RuntimeError(
+            f"Unexpected checkpoint format at '{weight_path}'. "
+            f"Expected a dict with a 'model' key, got {type(checkpoint).__name__}"
+        )
     state = {(k[7:] if k.startswith('module.') else k): v for k, v in state.items()}
     net.load_state_dict(state, strict=False)
 
