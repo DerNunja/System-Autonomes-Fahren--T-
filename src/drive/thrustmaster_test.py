@@ -211,6 +211,98 @@ def get_steering_angle(joystick) -> float:
     return raw / 32767.0
 
 
+# ── Button Erkennung ───────────────────────────────────────────────────────
+
+def get_all_axes(joystick) -> dict:
+    """Liest alle Achsen des Lenkrads aus."""
+    sdl2.SDL_JoystickUpdate()
+    num = sdl2.SDL_JoystickNumAxes(joystick)
+    return {i: sdl2.SDL_JoystickGetAxis(joystick, i) / 32767.0 for i in range(num)}
+
+
+def monitor_buttons(joystick):
+    """
+    Interaktiver Button-Monitor.
+    Zeigt alle Knopfdrücke und Achsenbewegungen in Echtzeit an.
+    Beenden mit Strg+C.
+
+    Nützlich um herauszufinden welcher Button welchen Index hat –
+    z.B. für spätere Nutzung als Notaus oder Modus-Umschalter.
+    """
+    num_buttons = sdl2.SDL_JoystickNumButtons(joystick)
+    num_axes    = sdl2.SDL_JoystickNumAxes(joystick)
+    num_hats    = sdl2.SDL_JoystickNumHats(joystick)
+
+    print(f"\n{'='*55}")
+    print(f"  BUTTON MONITOR")
+    print(f"{'='*55}")
+    print(f"  Buttons : {num_buttons}")
+    print(f"  Achsen  : {num_axes}")
+    print(f"  Hats    : {num_hats}  (D-Pad)")
+    print(f"{'='*55}")
+    print(f"  Drücke beliebige Knöpfe oder bewege Achsen.")
+    print(f"  Strg+C zum Beenden.\n")
+
+    # Vorherige Zustände für Änderungserkennung
+    prev_buttons = [0] * num_buttons
+    prev_axes    = [0.0] * num_axes
+    prev_hats    = [0] * num_hats
+
+    AXIS_THRESHOLD = 0.05  # Mindeständerung einer Achse für Ausgabe
+
+    # Hat-Richtungen als Text
+    HAT_NAMES = {
+        sdl2.SDL_HAT_CENTERED  : "MITTE",
+        sdl2.SDL_HAT_UP        : "OBEN",
+        sdl2.SDL_HAT_RIGHT     : "RECHTS",
+        sdl2.SDL_HAT_DOWN      : "UNTEN",
+        sdl2.SDL_HAT_LEFT      : "LINKS",
+        sdl2.SDL_HAT_RIGHTUP   : "RECHTS+OBEN",
+        sdl2.SDL_HAT_RIGHTDOWN : "RECHTS+UNTEN",
+        sdl2.SDL_HAT_LEFTUP    : "LINKS+OBEN",
+        sdl2.SDL_HAT_LEFTDOWN  : "LINKS+UNTEN",
+    }
+
+    try:
+        while True:
+            # SDL Events abarbeiten (nötig damit Joystick-State aktuell ist)
+            event = sdl2.SDL_Event()
+            while sdl2.SDL_PollEvent(ctypes.byref(event)):
+                pass
+
+            sdl2.SDL_JoystickUpdate()
+
+            # ── Buttons ──
+            for i in range(num_buttons):
+                state = sdl2.SDL_JoystickGetButton(joystick, i)
+                if state != prev_buttons[i]:
+                    aktion = "GEDRÜCKT  ▼" if state == 1 else "losgelassen ▲"
+                    print(f"  Button [{i:2d}]  {aktion}")
+                    prev_buttons[i] = state
+
+            # ── Achsen ──
+            for i in range(num_axes):
+                val = sdl2.SDL_JoystickGetAxis(joystick, i) / 32767.0
+                if abs(val - prev_axes[i]) > AXIS_THRESHOLD:
+                    bar_pos = int((val + 1) / 2 * 20)
+                    bar = "·" * bar_pos + "●" + "·" * (20 - bar_pos)
+                    print(f"  Achse  [{i:2d}]  [{bar}]  {val:+.3f}")
+                    prev_axes[i] = val
+
+            # ── Hats (D-Pad) ──
+            for i in range(num_hats):
+                val = sdl2.SDL_JoystickGetHat(joystick, i)
+                if val != prev_hats[i]:
+                    richtung = HAT_NAMES.get(val, f"0x{val:02X}")
+                    print(f"  Hat    [{i:2d}]  {richtung}")
+                    prev_hats[i] = val
+
+            time.sleep(0.01)  # 100 Hz Polling
+
+    except KeyboardInterrupt:
+        print("\n\n  Button-Monitor beendet.")
+
+
 # ── Testbewegung ───────────────────────────────────────────────────────────
 
 def run_test(joystick, haptic):
@@ -286,6 +378,11 @@ def main():
     print(f"Einstellungen : Kraft={MOVE_TORQUE:.0%}, Dauer={MOVE_DURATION:.1f}s\n")
 
     run_test(joystick, haptic)
+
+    # Nach dem FFB-Test: Button Monitor starten
+    print(f"\nFFB-Test abgeschlossen.")
+    print(f"Starte jetzt Button-Monitor (Strg+C zum Beenden) ...")
+    monitor_buttons(joystick)
 
     # Aufräumen
     sdl2.SDL_HapticClose(haptic)
