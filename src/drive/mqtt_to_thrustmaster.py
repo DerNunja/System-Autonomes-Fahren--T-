@@ -1,3 +1,37 @@
+"""
+============================================================
+  MQTT → THRUSTMASTER FORCE FEEDBACK LENKSTEUERUNG
+============================================================
+
+  Empfängt Lenkbefehle via MQTT und dreht das Thrustmaster-
+  Lenkrad physisch per Force Feedback. Der Simulator liest
+  dann ganz normal die echte Radposition aus.
+
+  Warum dieser Ansatz statt virtuellem Xbox-Controller:
+  → Simulatoren akzeptieren oft nur das direkt angeschlossene
+    Lenkrad als Eingabe, kein virtuelles Gamepad.
+  → Das physische Rad dreht sich → Simulator sieht echte
+    Achsenbewegung → funktioniert mit jedem Simulator.
+
+──────────────────────────────────────────────────────────
+  VORAUSSETZUNGEN
+──────────────────────────────────────────────────────────
+
+  1. Thrustmaster Treiber installieren (Windows)
+     → https://www.thrustmaster.com/de/support/
+     → Neu starten nach Installation!
+
+  2. Autocenter im Thrustmaster Control Panel auf 0% setzen
+     → Sonst kämpft der Motor gegen unsere Befehle
+
+  3. Python Pakete:
+     pip install pysdl2 pysdl2-dll paho-mqtt
+
+  4. BROKER unten eintragen (IP des MQTT-Brokers)
+
+──────────────────────────────────────────────────────────
+"""
+
 import json
 import time
 import ctypes
@@ -15,16 +49,18 @@ except ImportError:
 
 # ── Konfiguration ──────────────────────────────────────────────────────────
 
-BROKER           = ""       # IP des MQTT-Brokers (z.B. "192.168.1.42")
+BROKER           = "10.1.90.42"       # IP des MQTT-Brokers (z.B. "192.168.1.42")
 PORT             = 1883
 TOPIC            = "control/steering_cmd"
 
 JOYSTICK_INDEX   = 0        # Index des Thrustmaster (0 = erstes Gerät)
 
-# Regler
-KP               = 0.8      # Proportionalverstärkung  ← wichtigster Tuning-Parameter
-KD               = 0.05     # Dämpfung (reduziert Überschwingen)
-MAX_TORQUE       = 0.6      # Maximales Drehmoment 0.0–1.0  (Sicherheitslimit!)
+# Regler (Position → Drehmoment)
+KP               = 0.35     # Proportional – niedrig halten gegen Aufschaukeln!
+KD               = 0.08     # Dämpfung – reduziert Überschwingen
+MAX_TORQUE       = 0.5      # Maximales Drehmoment 0.0–1.0  (Sicherheitslimit!)
+FFB_DIRECTION    = +1       # +1 oder -1. Wird beim Start automatisch geprüft.
+                            # Falls Rad in falsche Richtung pusht → auf -1 setzen.
 
 # Eingang (MQTT)
 STEER_GAIN       = 1.0      # Skalierung des Eingangssignals
@@ -59,7 +95,7 @@ def ema(prev: float, new: float, alpha: float) -> float:
 
 @dataclass
 class State:
-    target_angle : float = 0.0   # Soll-Winkel vom Assistenten (-1..+1)
+    target_angle : float = 0.0   # Soll-Position aus steer_norm (-1..+1)
     steer_ema    : float = 0.0   # Geglätteter Zielwert
     last_msg_t   : float = 0.0   # Zeitstempel letzte MQTT-Nachricht
     last_error   : float = 0.0   # Für D-Anteil
@@ -108,44 +144,152 @@ def init_wheel():
 
 def get_angle(joystick) -> float:
     """Aktueller Lenkwinkel: -1.0 (links) bis +1.0 (rechts)"""
+    # SDL_PollEvent MUSS aufgerufen werden damit SDL_JoystickUpdate
+    # tatsächlich neue Werte liefert – ohne das bleibt der Wert eingefroren!
+    event = sdl2.SDL_Event()
+    while sdl2.SDL_PollEvent(ctypes.byref(event)):
+        pass
     sdl2.SDL_JoystickUpdate()
     return sdl2.SDL_JoystickGetAxis(joystick, 0) / 32767.0
 
 
+def test_ffb_direction(joystick, haptic):
+    """
+    Sendet kurz ein kleines positives Drehmoment und prüft ob das Rad
+    sich nach rechts bewegt. Falls nicht → FFB_DIRECTION ist invertiert.
+    """
+    global FFB_DIRECTION
+    print(f"\n[TEST] Prüfe FFB-Richtung ...")
+    print(f"  Sende Drehmoment +0.30 nach rechts für 1.0s ...")
+
+    start_angle = get_angle(joystick)
+    print(f"  Startwinkel: {start_angle:+.3f}")
+
+    # Drehmoment kontinuierlich anwenden (nicht nur einmal setzen!)
+    test_torque = 0.30
+    end_time = time.time() + 1.0
+    max_delta = 0.0
+    last_angle = start_angle
+
+    while time.time() < end_time:
+        set_torque(haptic, test_torque)
+        angle = get_angle(joystick)
+        delta = angle - start_angle
+        if abs(delta) > abs(max_delta):
+            max_delta = delta
+        last_angle = angle
+        time.sleep(0.02)
+
+    end_angle = last_angle
+    set_torque(haptic, 0.0)
+
+    delta = end_angle - start_angle
+    print(f"  Endwinkel:   {end_angle:+.3f}   (Δ = {delta:+.3f}, max |Δ| = {abs(max_delta):.3f})")
+
+    if abs(max_delta) < 0.02:
+        print(f"  ⚠ Rad hat sich kaum bewegt. Mögliche Ursachen:")
+        print(f"    → Autocenter im Thrustmaster Control Panel noch aktiv")
+        print(f"    → Rad steht am physischen Anschlag")
+        print(f"    → FFB-Treiber liefert keine Kraft (Logitech/Thrustmaster Software prüfen)")
+        time.sleep(1.5)
+        return
+
+    if max_delta > 0:
+        print(f"  ✓ Rad bewegt sich korrekt nach rechts (FFB_DIRECTION = +1)")
+    else:
+        print(f"  ⚠ Rad bewegt sich nach LINKS bei positivem Drehmoment!")
+        print(f"  → FFB ist invertiert. Setze FFB_DIRECTION = -1 automatisch.")
+        FFB_DIRECTION = -1
+
+    time.sleep(0.5)
+
+
+def homing(joystick, haptic):
+    """
+    Zentriert das Lenkrad sanft bevor der Regler startet.
+    Nutzt set_torque() damit FFB_DIRECTION berücksichtigt wird.
+    """
+    print(f"\n[HOMING] Zentriere Lenkrad ...")
+    KP_HOME      = 0.4
+    TORQUE_LIMIT = 0.3
+    THRESHOLD    = 0.05   # Gilt als zentriert wenn |Winkel| < 5%
+    TIMEOUT      = 5.0    # Max. Sekunden für Homing
+
+    start = time.time()
+
+    while time.time() - start < TIMEOUT:
+        angle = get_angle(joystick)
+
+        if abs(angle) < THRESHOLD:
+            set_torque(haptic, 0.0)
+            print(f"\n[HOMING] Zentriert ✓  (Winkel: {angle:+.3f})")
+            time.sleep(0.3)
+            return
+
+        torque = clamp(-KP_HOME * angle, -TORQUE_LIMIT, TORQUE_LIMIT)
+        set_torque(haptic, torque)
+
+        print(f"\r[HOMING] Winkel: {angle:+.3f}  Torque: {torque:+.3f}  ", end="", flush=True)
+        time.sleep(0.02)
+
+    set_torque(haptic, 0.0)
+    print(f"\n[HOMING] Timeout – Rad steht bei {get_angle(joystick):+.3f} (weiter ...)")
+
+
 _effect_id = -1
+_effect    = None   # wiederverwendbares Effect-Struct
 
 def set_torque(haptic, torque: float):
-    """Sendet Constant-Force-Effekt. Ersetzt vorherigen Effekt."""
-    global _effect_id
+    """
+    Setzt das Drehmoment als Constant-Force-Effekt.
+    Verwendet HapticUpdateEffect statt destroy/create für stabilere
+    Treiber-Kommunikation (besonders wichtig bei Thrustmaster, die das
+    rapide Neu-Erstellen oft nicht sauber verarbeiten).
+    """
+    global _effect_id, _effect
 
     torque = clamp(torque, -MAX_TORQUE, MAX_TORQUE)
-    level  = int(torque * 32767)
+    level  = int(torque * FFB_DIRECTION * 32767)
 
-    effect = sdl2.SDL_HapticEffect()
-    effect.type = sdl2.SDL_HAPTIC_CONSTANT
-    effect.constant.direction.type = sdl2.SDL_HAPTIC_CARTESIAN
-    effect.constant.direction.dir[0] = 1
-    effect.constant.length           = EFFECT_MS * 2
-    effect.constant.level            = level
-    effect.constant.attack_length    = 0
-    effect.constant.attack_level     = abs(level)
-    effect.constant.fade_length      = 0
-    effect.constant.fade_level       = abs(level)
+    # Effekt-Struct beim ersten Mal anlegen
+    if _effect is None:
+        _effect = sdl2.SDL_HapticEffect()
+        _effect.type = sdl2.SDL_HAPTIC_CONSTANT
+        _effect.constant.direction.type   = sdl2.SDL_HAPTIC_CARTESIAN
+        _effect.constant.direction.dir[0] = 1
+        _effect.constant.length           = sdl2.SDL_HAPTIC_INFINITY
+        _effect.constant.delay            = 0
+        _effect.constant.button           = 0
+        _effect.constant.interval         = 0
+        _effect.constant.attack_length    = 0
+        _effect.constant.attack_level     = 0
+        _effect.constant.fade_length      = 0
+        _effect.constant.fade_level       = 0
 
-    # Alten Effekt löschen
-    if _effect_id >= 0:
-        sdl2.SDL_HapticStopEffect(haptic, _effect_id)
-        sdl2.SDL_HapticDestroyEffect(haptic, _effect_id)
+    _effect.constant.level = level
 
-    _effect_id = sdl2.SDL_HapticNewEffect(haptic, ctypes.byref(effect))
-    if _effect_id >= 0:
-        sdl2.SDL_HapticRunEffect(haptic, _effect_id, 1)
+    # Beim ersten Aufruf hochladen, danach nur noch updaten
+    if _effect_id < 0:
+        _effect_id = sdl2.SDL_HapticNewEffect(haptic, ctypes.byref(_effect))
+        if _effect_id >= 0:
+            sdl2.SDL_HapticRunEffect(haptic, _effect_id, sdl2.SDL_HAPTIC_INFINITY)
+        else:
+            err = sdl2.SDL_GetError()
+            print(f"\n[FFB] NewEffect Fehler: {err}")
+    else:
+        result = sdl2.SDL_HapticUpdateEffect(haptic, _effect_id, ctypes.byref(_effect))
+        if result < 0:
+            err = sdl2.SDL_GetError()
+            print(f"\n[FFB] UpdateEffect Fehler: {err}")
 
 
 def stop_all(haptic):
-    global _effect_id
-    sdl2.SDL_HapticStopAll(haptic)
+    global _effect_id, _effect
+    if _effect_id >= 0:
+        sdl2.SDL_HapticStopEffect(haptic, _effect_id)
+        sdl2.SDL_HapticDestroyEffect(haptic, _effect_id)
     _effect_id = -1
+    _effect = None
 
 
 # ── MQTT Callbacks ─────────────────────────────────────────────────────────
@@ -165,14 +309,14 @@ def on_message(client, userdata, msg):
     if "steer_norm" not in payload:
         return
 
-    raw = float(payload["steer_norm"])
+    raw    = float(payload["steer_norm"])
     scaled = clamp(raw * STEER_GAIN, -1.0, 1.0)
     dz     = apply_deadzone(scaled, STEER_DEADZONE)
 
     with state.lock:
-        state.steer_ema  = ema(state.steer_ema, dz, EMA_ALPHA)
+        state.steer_ema    = ema(state.steer_ema, dz, EMA_ALPHA)
         state.target_angle = state.steer_ema
-        state.last_msg_t = time.time()
+        state.last_msg_t   = time.time()
 
 
 # ── PD-Regelschleife ───────────────────────────────────────────────────────
@@ -180,22 +324,19 @@ def on_message(client, userdata, msg):
 def control_loop(joystick, haptic):
     """
     Läuft mit CONTROL_HZ.
-    Berechnet aus Soll/Ist-Winkel das nötige Drehmoment (PD-Regler)
-    und schickt es als Constant-Force-Effekt ans Lenkrad.
+    Steuert das Rad zur Soll-Position (aus steer_norm) per PD-Regler.
     """
     dt = 1.0 / CONTROL_HZ
-    print(f"[REGLER] Gestartet @ {CONTROL_HZ} Hz  |  KP={KP}  KD={KD}  MAX={MAX_TORQUE:.0%}")
-    print(f"{'─'*55}")
-    print(f"  {'Soll':>8}  {'Ist':>8}  {'Fehler':>8}  {'Drehm.':>8}")
+    print(f"[REGLER] @ {CONTROL_HZ} Hz  |  KP={KP}  KD={KD}  MAX={MAX_TORQUE:.0%}")
     print(f"{'─'*55}")
 
     while True:
         now = time.time()
 
         with state.lock:
-            target    = state.target_angle
-            last_t    = state.last_msg_t
-            last_err  = state.last_error
+            target   = state.target_angle
+            last_t   = state.last_msg_t
+            last_err = state.last_error
 
         # Timeout: kein MQTT seit CMD_TIMEOUT_S → sanft zentrieren
         if last_t > 0 and (now - last_t) > CMD_TIMEOUT_S:
@@ -207,9 +348,8 @@ def control_loop(joystick, haptic):
         current = get_angle(joystick)
         error   = target - current
 
-        # PD
-        d_error  = (error - last_err) / dt
-        torque   = KP * error + KD * d_error
+        d_error = (error - last_err) / dt
+        torque  = KP * error + KD * d_error
 
         set_torque(haptic, torque)
 
@@ -248,6 +388,10 @@ def main():
     print(f"[MQTT] Verbinde mit {BROKER}:{PORT} ...")
     client.connect(BROKER, PORT, keepalive=30)
     client.loop_start()
+
+    # Erst FFB-Richtung testen, dann zentrieren, dann Regler starten
+    test_ffb_direction(joystick, haptic)
+    homing(joystick, haptic)
 
     try:
         control_loop(joystick, haptic)
