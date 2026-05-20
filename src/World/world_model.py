@@ -285,6 +285,17 @@ class WorldModel:
 
         quality = 0.5 * (left_lane.score + right_lane.score)
 
+        if quality < 0.1 or len(centerline_px) < 5:
+            return EgoLaneState(
+                has_ego_lane=False,
+                centerline_px=[],
+                lateral_offset_px=0.0,
+                heading_px_rad=0.0,
+                quality=float(quality),
+                lane_width_px=float(lane_width_px),
+                lateral_offset_m=0.0,
+            )
+
         # --- EMA-Glättung ---
         alpha = self.ema_alpha
 
@@ -300,17 +311,6 @@ class WorldModel:
 
         smooth_offset_m = self._ema_offset_m
         smooth_heading  = self._ema_heading
-
-        if quality < 0.1 or len(centerline_px) < 5:
-            return EgoLaneState(
-                has_ego_lane=False,
-                centerline_px=[],
-                lateral_offset_px=0.0,
-                heading_px_rad=0.0,
-                quality=float(quality),
-                lane_width_px=float(lane_width_px),
-                lateral_offset_m=0.0,
-            )
 
         # --- Steering-Preview: einfache Krümmungsabschätzung der Centerline ---
         # Wir nehmen den untersten und einen weiter oben liegenden Punkt und schauen,

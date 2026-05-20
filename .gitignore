@@ -63,10 +63,11 @@ cover/
 docs/_build/
 site/
 docs.md
+codebase-understanding.md
 
 #Roh-Daten
-Behavioural_Cloning_Basic/data/Recordings/Video/
-Behavioural_Cloning_Basic/data/Recordings/TabData/
+src/data/Recordings/Video/
+src/data/Recordings/TabData/
 
 # ========================================
 # Projekt-spezifische Excludes
@@ -74,7 +75,7 @@ Behavioural_Cloning_Basic/data/Recordings/TabData/
 
 # --- Modelle & Gewichte ---
 # (Culan & Tusimple → nicht versionieren)
-Behavioural_Cloning_Basic/LaneDetection/weights/*.pth
+src/LaneDetection/weights/*.pth
 weights/*.pth
 
 # --- Cache-Ordner vom Modell ---
@@ -87,12 +88,12 @@ LaneDetection/output/
 LaneDetection/tmp/
 
 # --- Prozessierte/dynamische Daten ---
-Behavioural_Cloning_Basic/data/Processed/frames/
-Behavioural_Cloning_Basic/data/Processed/seg_masks/
-Behavioural_Cloning_Basic/data/Processed/LaneDetection/
-Behavioural_Cloning_Basic/data/tmp/
-Behavioural_Cloning_Basic/data/test/
-Behavioural_Cloning_Basic/data/Processed/test_labels.mp4
+src/data/Processed/frames/
+src/data/Processed/seg_masks/
+src/data/Processed/LaneDetection/
+src/data/tmp/
+src/data/test/
+src/data/Processed/test_labels.mp4
 # ========================================
 # System Files
 # ========================================

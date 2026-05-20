@@ -1,0 +1,12 @@
+dataset = 'CULane'
+backbone = '34'
+use_aux = False
+num_lanes = 4
+num_row = 72
+num_col = 81
+train_width = 1600
+train_height = 320
+num_cell_row = 200
+num_cell_col = 100
+fc_norm = True
+crop_ratio = 0.6
