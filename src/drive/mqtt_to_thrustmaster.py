@@ -49,7 +49,7 @@ except ImportError:
 
 # ── Konfiguration ──────────────────────────────────────────────────────────
 
-BROKER           = "10.1.90.42"       # IP des MQTT-Brokers (z.B. "192.168.1.42")
+BROKER           = ""       # IP des MQTT-Brokers (z.B. "192.168.1.42")
 PORT             = 1883
 TOPIC            = "control/steering_cmd"
 
