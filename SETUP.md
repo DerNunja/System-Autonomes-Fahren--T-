@@ -7,8 +7,8 @@ Zwei Rechner kommunizieren über NDI (Video) und MQTT (Wahrnehmungs- und Diagnos
 ```
 [Simulator/Drive PC]                    [Perception PC]
 ┌─────────────────────────────┐          ┌─────────────────────────────┐
-│ Fahrsimulator                │          │ sender_video.py (NDI)       │
-│ mqtt_to_thrustmaster.py      │          │ receiver_video.py           │
+│ Fahrsimulator                │          │ video/send_video.py         │
+│ mqtt_to_thrustmaster.py      │          │ perception/run_perception.py│
 │  ├─ drive_controller.py      │◄─ MQTT ─ │  ├─ Lane Detection (UFLD v2)│
 │  ├─ Thrustmaster FFB         │ lanestate│  ├─ World Model             │
 │  └─ steering_cmd diagnostics │─ MQTT ─► │  └─ MQTT Publisher          │
@@ -45,17 +45,17 @@ Der Broker läuft standardmäßig auf `localhost:1883`. Auf einem zweiten Rechne
 
 ## Skripte auf dem Perception PC
 
-### 1. NDI Video Sender (optional - nur wenn Simulator kein NDI direkt sendet)
+### 1. Video Sender (optional - nur wenn Simulator kein NDI direkt sendet)
 
 Sendet einen Videostream über das Netzwerk. Nimmt entweder eine Videodatei oder eine Live-Kamera.
 
 ```bash
-cd Behavioural_Cloning_Basic/ndi_tools/
-uv run sender_video.py
+cd src/
+uv run video/send_video.py
 ```
 
-- `VIDEO_PATH` in `sender_video.py` anpassen für eigene Videos
-- `USE_LIVE_SOURCE = True` für Live-Kamera
+- `video_path` in `video/sender_app.py` anpassen für eigene Videos
+- `use_live_source=True` in `VideoSenderConfig` für Live-Kamera
 - Sendet NDI-Stream mit Name **"Demo"**
 
 ### 2. Wahrnehmungsskript - Lane Detection
@@ -63,8 +63,8 @@ uv run sender_video.py
 Empfängt NDI-Video, erkennt Fahrstreifen, bildet einen Ego-Spurzustand und publiziert diesen über MQTT.
 
 ```bash
-cd Behavioural_Cloning_Basic/ndi_tools/
-uv run receiver_video.py
+cd src/
+uv run perception/run_perception.py
 ```
 
 **Was es macht:**
@@ -89,8 +89,8 @@ uv run receiver_video.py
 Empfängt Lane-State vom Perception PC, berechnet Lenkbefehle auf dem Steuerrechner und bewegt das Thrustmaster-Lenkrad per Force Feedback.
 
 ```bash
-cd Behavioural_Cloning_Basic/drive/
-uv run mqtt_to_thrustmaster.py
+cd src/
+uv run drive/mqtt_to_thrustmaster.py
 ```
 
 **Wichtig:** `BROKER` in `mqtt_to_thrustmaster.py` auf die IP des MQTT Brokers setzen (nicht leer lassen für Remote-Broker).
@@ -121,16 +121,14 @@ uv run mqtt_to_thrustmaster.py
 control/steering_cmd      ← mqtt_to_thrustmaster.py publiziert Lenkdiagnostik
                             mqtt_to_xbox.py kann optional subscriben
 
-sensor/lanestate          ← receiver_video.py publiziert Lane-Status
+sensor/lanestate          ← perception/run_perception.py publiziert Lane-Status
                             mqtt_to_thrustmaster.py subscribt
                             mqtt_broker.py aggregiert
-                            ui_world.py subscribt (teilweise)
 
 sensor/objects            ← Mock Perception (test/demo)
 sensor/vehicle_state      ← CSV-Replay (Offline-Analyse)
 
 world/state               ← mqtt_broker.py publiziert aggregierten Zustand
-                            ui_world.py subscribt (konzeptionell)
 ```
 
 ---
@@ -140,8 +138,8 @@ world/state               ← mqtt_broker.py publiziert aggregierten Zustand
 Aggregiert alle Sensordaten und publiziert konsolidierten Weltzustand.
 
 ```bash
-cd Behavioural_Cloning_Basic/mqtt/
-uv run mqtt_broker.py
+cd src/
+uv run mqtt/mqtt_broker.py
 ```
 
 Publiziert alle 100ms (`world/state`) mit: `objects`, `lanestate`, `steering_cmd`, `vehicle_state`, `last_update_ts`
@@ -150,14 +148,7 @@ Publiziert alle 100ms (`world/state`) mit: `objects`, `lanestate`, `steering_cmd
 
 ## UI Monitor (optional - für Debugging)
 
-Tkinter-GUI zur Echtzeit-Überwachung.
-
-```bash
-cd Behavioural_Cloning_Basic/mqtt/
-uv run ui_world.py
-```
-
-Zeigt: Lane-Offset, Krümmung, Fahrzeugzustand, erkannte Objekte, rohe JSON-Daten.
+Ein UI-Monitor ist konzeptionell vorgesehen, liegt in diesem Checkout aber nicht als startbares Skript vor. Wenn er wieder ergänzt wird, sollte er `world/state` oder direkt `sensor/lanestate` abonnieren.
 
 ---
 
@@ -168,18 +159,17 @@ Zeigt: Lane-Offset, Krümmung, Fahrzeugzustand, erkannte Objekte, rohe JSON-Date
 mosquitto -p 1883
 
 # 2. Perception PC: Video-Quelle starten
-cd Behavioural_Cloning_Basic/ndi_tools/
-uv run sender_video.py          # Falls Simulator kein NDI direkt sendet
+cd src/
+uv run video/send_video.py      # Falls Simulator kein NDI direkt sendet
 
 # 3. Perception PC: Wahrnehmung starten
-uv run receiver_video.py        # Lane Detection + sensor/lanestate Publishing
+uv run perception/run_perception.py  # Lane Detection + sensor/lanestate Publishing
 
 # 4. Simulator/Drive PC: MQTT → Thrustmaster starten
-cd Behavioural_Cloning_Basic/drive/
-uv run mqtt_to_thrustmaster.py  # Berechnet Lenkung + bewegt Lenkrad
+cd src/
+uv run drive/mqtt_to_thrustmaster.py  # Berechnet Lenkung + bewegt Lenkrad
 
-# Optional: Bridge + UI auf einem beliebigen Rechner
-cd Behavioural_Cloning_Basic/mqtt/
-uv run mqtt_broker.py
-uv run ui_world.py
+# Optional: Bridge auf einem beliebigen Rechner
+cd src/
+uv run mqtt/mqtt_broker.py
 ```
