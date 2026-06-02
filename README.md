@@ -1,8 +1,8 @@
 # System Autonomes Fahren (T) - S.A.F.T
 
-Verteiltes, regelbasiertes System fuer autonomes Fahren im Fahrsimulator der Hochschule Harz.
+Verteiltes, regelbasiertes System für autonomes Fahren im Fahrsimulator der Hochschule Harz.
 
-Das Projekt verarbeitet einen Videostream aus dem Simulator, erkennt Fahrstreifen, erzeugt daraus einen interpretierten Spurzustand und berechnet auf einem separaten Steuerrechner die Lenkbefehle fuer ein Thrustmaster-Lenkrad. Der aktuelle Stand ist bewusst deterministisch und regelbasiert, nicht Behavioural Cloning.
+Das Projekt verarbeitet einen Videostream aus dem Simulator, erkennt Fahrstreifen, erzeugt daraus einen interpretierten Spurzustand und berechnet auf einem separaten Steuerrechner die Lenkbefehle für ein Thrustmaster-Lenkrad. Der aktuelle Stand ist bewusst deterministisch und regelbasiert, nicht Behavioural Cloning.
 
 ## Architektur
 
@@ -27,7 +27,7 @@ Die Rollen sind klar getrennt:
 
 - Perception PC: Video empfangen, Fahrstreifen erkennen, Ego-Spurzustand publizieren.
 - Drive/Simulator PC: Spurzustand empfangen, Lenkziel berechnen, aktuelles Lenkrad lokal regeln.
-- MQTT: Transport fuer Wahrnehmungsdaten, Steuerdiagnostik und aggregierte Zustaende.
+- MQTT: Transport für Wahrnehmungsdaten, Steuerdiagnostik und aggregierte Zustaende.
 - NDI: Videotransport zwischen Simulator/Videoquelle und Perception PC.
 
 ## Module
@@ -55,10 +55,10 @@ Wichtige Einstiegspunkte:
 ## Voraussetzungen
 
 - Python `>=3.10`
-- `uv` fuer Dependency-Management
+- `uv` für Dependency-Management
 - Mosquitto MQTT Broker
 - NDI SDK / `visiongraph-ndi`
-- CUDA-faehige GPU empfohlen fuer Lane Detection
+- CUDA-faehige GPU empfohlen für Lane Detection
 - Thrustmaster-Treiber und `pysdl2` auf dem Drive/Simulator PC
 
 Abhaengigkeiten installieren:
@@ -105,7 +105,7 @@ cd src
 uv run mqtt/mqtt_broker.py
 ```
 
-Bei Betrieb ueber zwei Rechner muss `BROKER` im Drive-Skript auf die IP des MQTT-Brokers gesetzt werden.
+Bei Betrieb über zwei Rechner muss `BROKER` im Drive-Skript auf die IP des MQTT-Brokers gesetzt werden.
 
 ## MQTT Topics
 
@@ -118,7 +118,7 @@ Bei Betrieb ueber zwei Rechner muss `BROKER` im Drive-Skript auf die IP des MQTT
 ## Dokumentation
 
 - `SETUP.md`: konkrete Startanleitung und Rechneraufteilung
-- `codebase-understanding.md`: technische Codebase-Uebersicht
+- `codebase-understanding.md`: technische Codebase-übersicht
 - `docs.md`: ausformulierte Projektdokumentation
 
 ## Entwicklungsstand
@@ -126,9 +126,9 @@ Bei Betrieb ueber zwei Rechner muss `BROKER` im Drive-Skript auf die IP des MQTT
 Der aktuelle Stand ist ein regelbasierter Prototyp:
 
 - Fahrstreifenerkennung mit UFLD v2
-- Weltmodell fuer Ego-Spur, Offset, Heading und Kruemmungsvorschau
+- Weltmodell für Ego-Spur, Offset, Heading und Kruemmungsvorschau
 - Stanley-aehnliche Lateralregelung auf dem Drive PC
-- physische Lenkradregelung ueber Thrustmaster Force Feedback
+- physische Lenkradregelung über Thrustmaster Force Feedback
 - MQTT-basierte Trennung zwischen Wahrnehmung und Steuerung
 
 Nicht aktueller Fokus:
