@@ -8,24 +8,19 @@ Das Projekt verarbeitet einen Videostream aus dem Simulator, erkennt Fahrstreife
 
 ```mermaid
 graph TB
-    subgraph SimulatorDrivePC["Simulator/Drive PC"]
-        direction TB
-        Simulator["Fahrsimulator"]
-        DriveCtrl["mqtt_to_thrustmaster.py"]
-        DriveCtrlDetails["• drive_controller.py\n• Thrustmaster FFB\n• steering_cmd diagnostics"]
-    end
-
     subgraph PerceptionPC["Perception PC"]
-        direction TB
         SendVideo["video/send_video.py"]
         RunPerception["perception/run_perception.py"]
-        PerceptionDetails["• Lane Detection (UFLD v2)\n• World Model\n• MQTT Publisher"]
+        PerceptionDetails["Lane Detection UFLD v2<br/>World Model<br/>MQTT Publisher"]
     end
 
-    SimulatorDrivePC --- PerceptionPC
+    subgraph SimulatorDrivePC["Simulator/Drive PC"]
+        Simulator["Fahrsimulator"]
+        DriveCtrl["mqtt_to_thrustmaster.py"]
+        DriveCtrlDetails["drive_controller.py<br/>Thrustmaster FFB<br/>steering_cmd diagnostics"]
+    end
 
-    SimulatorDrivePC -- "lanestate\n<- MQTT ->" PerceptionPC
-    PerceptionPC -- "steering_cmd diagnostics\n<- MQTT ->" SimulatorDrivePC
+    RunPerception -- "lanestate MQTT" -- DriveCtrl
 ```
 
 Die Rollen sind klar getrennt:
