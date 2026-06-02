@@ -20,7 +20,7 @@ graph TB
         DriveCtrlDetails["drive_controller.py<br/>Thrustmaster FFB<br/>steering_cmd diagnostics"]
     end
 
-    RunPerception -- "lanestate MQTT" -- DriveCtrl
+    RunPerception -->|lanestate MQTT| DriveCtrl
 ```
 
 Die Rollen sind klar getrennt:
