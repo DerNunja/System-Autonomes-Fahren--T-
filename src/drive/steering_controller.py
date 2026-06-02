@@ -63,7 +63,7 @@ class LateralController:
         d_offset_dt = self._update_history(offset_m, t)
 
         # --- Feed-Forward: Spurkrümmung -> Lenkwinkel ---
-        # kappa > 0 (Linkskurve) => positiver Lenkwinkel
+        # kappa > 0 (Rechtskurve) => positiver Lenkwinkel
         steer_ff = self.k_ff * curvature_preview
 
         # --- Stanley-Feedback ---

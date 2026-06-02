@@ -2,12 +2,10 @@ import cv2
 import numpy as np
 import time
 import sys
-import math
 import json
 import paho.mqtt.client as mqtt
 
 from pathlib import Path
-from typing import Tuple
 from visiongraph_ndi.NDIVideoInput import NDIVideoInput
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +14,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from LaneDetection.lanedetec_runner import init_lanedetector, process_frame
 from World.world_model import LaneDetResult, WorldModel
-from drive.steering_controller import LateralController
 
 # Optional: Torch für GPU-Synchronisation importieren
 try:
@@ -27,10 +24,9 @@ except ImportError:
 
 # --- MQTT-Konfiguration ---
 BROKER = "localhost"
-TOPIC_CMD = "control/steering_cmd"
 TOPIC_LANESTATE = "sensor/lanestate"  # <--- NEU: für mqtt_bridge/ui_world_monitor
 
-mqtt_client = mqtt.Client(client_id="lane-steer-controller")
+mqtt_client = mqtt.Client(client_id="lane-perception")
 mqtt_client.connect(BROKER, 1883, keepalive=60)
 mqtt_client.loop_start()
 
@@ -89,36 +85,6 @@ def draw_curvature_preview(vis_bgr: np.ndarray, ego_lane) -> np.ndarray:
         2,
     )
 
-    return vis_bgr
-
-
-def draw_steering_preview(
-    vis_bgr: np.ndarray,
-    origin: Tuple[int, int],
-    steer_cmd,
-    length_px: int = 120,
-) -> np.ndarray:
-    """
-    Zeichnet einen Preview-Pfeil basierend auf dem Lenkwinkel.
-    """
-    cx, cy = origin
-    angle = steer_cmd.steer_rad  # rad
-
-    # Fahrzeugkoordinaten: x nach vorne, y nach links
-    dx = math.sin(angle)
-    dy = -math.cos(angle)   # fürs Bild: nach unten ist +v
-
-    x2 = int(cx + dx * length_px)
-    y2 = int(cy + dy * length_px)
-
-    cv2.arrowedLine(
-        vis_bgr,
-        (cx, cy),
-        (x2, y2),
-        (0, 100, 200),
-        3,
-        tipLength=0.2,
-    )
     return vis_bgr
 
 
@@ -224,6 +190,36 @@ def run_perception_models(
     return vis_bgr, fps_inst, n_lanes, model_dt, lanes_xy, lanes_info
 
 
+def build_lanestate_payload(timestamp_ms: int, ego_lane) -> dict:
+    if ego_lane is None or not ego_lane.has_ego_lane:
+        return {
+            "t_ms": timestamp_ms,
+            "has_ego_lane": False,
+            "offset_m": 0.0,
+            "heading_error_rad": 0.0,
+            "curvature_preview": 0.0,
+            "quality": 0.0,
+            "lane_center": 0.0,
+            "curvature": 0.0,
+        }
+
+    offset_m = float(ego_lane.lateral_offset_m)
+    curvature = float(ego_lane.curvature_preview)
+    return {
+        "t_ms": timestamp_ms,
+        "has_ego_lane": True,
+        "offset_m": offset_m,
+        "heading_error_rad": float(ego_lane.heading_px_rad),
+        "curvature_preview": curvature,
+        "quality": float(ego_lane.quality),
+        "lateral_offset_px": float(ego_lane.lateral_offset_px),
+        "lane_width_px": float(ego_lane.lane_width_px),
+        # Legacy fields for mqtt_broker.py and current UI consumers.
+        "lane_center": offset_m,
+        "curvature": curvature,
+    }
+
+
 def main():
     print("[INFO] Lane detector init...")
     net, cfg, img_transforms, device = init_lanedetector()
@@ -262,7 +258,6 @@ def main():
         cv2.namedWindow("LaneDetection Stream", cv2.WINDOW_NORMAL)
 
         wm: WorldModel | None = None  # Weltmodell-Instanz (wird lazy initialisiert)
-        controller: LateralController | None = None
 
         while ndi.is_connected:
             loop_t0 = time.time()
@@ -283,13 +278,6 @@ def main():
             # WorldModel beim ersten validen Frame initialisieren
             if wm is None:
                 wm = WorldModel(img_width=W, img_height=H)
-                controller = LateralController(
-                    max_steer_rad=0.5,
-                    k_stanley=1.0,
-                    v_ref=20.0,
-                    k_ff=8.0,
-                    history_window_s=0.5,
-                )
 
             # Video-Timestamps für avg_video_fps sammeln
             if ts is not None:
@@ -322,53 +310,12 @@ def main():
             if wm_state.ego_lane is not None:
                 vis_bgr = draw_ego_centerline(vis_bgr, wm_state.ego_lane)
 
-            if wm_state.ego_lane and wm_state.ego_lane.has_ego_lane and controller is not None:
+            timestamp_ms = int(ts) if ts is not None else 0
+            lanestate_msg = build_lanestate_payload(timestamp_ms, wm_state.ego_lane)
+            mqtt_client.publish(TOPIC_LANESTATE, json.dumps(lanestate_msg))
+
+            if wm_state.ego_lane and wm_state.ego_lane.has_ego_lane:
                 ego = wm_state.ego_lane
-                cmd = controller.update(
-                    offset_m=ego.lateral_offset_m,
-                    heading_error_rad=ego.heading_px_rad,
-                    curvature_preview=ego.curvature_preview,
-                )
-
-                # Steering-Pfeil
-                origin = (W // 2, int(H * 0.8))
-                vis_bgr = draw_steering_preview(vis_bgr, origin, cmd)
-
-                # Debug-Text
-                txt3 = (
-                    f"offset={ego.lateral_offset_m:+.2f} m, "
-                    f"steer={cmd.steer_rad:+.3f} rad (norm={cmd.steer_norm:+.2f}), "
-                    f"ff={cmd.ff_term:+.3f}"
-                )
-                cv2.putText(
-                    vis_bgr,
-                    txt3,
-                    (10, 200),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 200, 255),
-                    2,
-                )
-
-                # --- EXISTIERENDER Steering-Command-Publish ---
-                payload = {
-                    "t_ms": int(ts) if ts is not None else 0,
-                    "steer_rad": cmd.steer_rad,        # physischer Lenkwinkel
-                    "steer_norm": cmd.steer_norm,      # -1..+1
-                    "ff_term": cmd.ff_term,
-                    "offset_m": ego.lateral_offset_m,
-                    "heading_err_rad": ego.heading_px_rad,
-                    "curvature": ego.curvature_preview,
-                }
-                mqtt_client.publish(TOPIC_CMD, json.dumps(payload))
-
-                # --- NEU: LaneState für mqtt_bridge / UI ---
-                lanestate_msg = {
-                    "lane_center": float(ego.lateral_offset_m),
-                    "curvature": float(ego.curvature_preview),
-                }
-                mqtt_client.publish(TOPIC_LANESTATE, json.dumps(lanestate_msg))
-
                 # Krümmungs-Pfeil
                 vis_bgr = draw_curvature_preview(vis_bgr, ego)
 

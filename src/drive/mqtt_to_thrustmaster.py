@@ -3,9 +3,10 @@
   MQTT → THRUSTMASTER FORCE FEEDBACK LENKSTEUERUNG
 ============================================================
 
-  Empfängt Lenkbefehle via MQTT und dreht das Thrustmaster-
-  Lenkrad physisch per Force Feedback. Der Simulator liest
-  dann ganz normal die echte Radposition aus.
+  Empfängt Wahrnehmungsdaten via MQTT, berechnet daraus lokal
+  Lenkbefehle und dreht das Thrustmaster-Lenkrad physisch per
+  Force Feedback. Der Simulator liest dann ganz normal die echte
+  Radposition aus.
 
   Warum dieser Ansatz statt virtuellem Xbox-Controller:
   → Simulatoren akzeptieren oft nur das direkt angeschlossene
@@ -41,6 +42,14 @@ from dataclasses import dataclass, field
 import paho.mqtt.client as mqtt
 
 try:
+    from .drive_controller import DriveController, DriveControllerResult
+except ImportError:
+    try:
+        from drive.drive_controller import DriveController, DriveControllerResult
+    except ImportError:
+        from drive_controller import DriveController, DriveControllerResult
+
+try:
     import sdl2
     import sdl2.ext
 except ImportError:
@@ -49,9 +58,10 @@ except ImportError:
 
 # ── Konfiguration ──────────────────────────────────────────────────────────
 
-BROKER           = ""       # IP des MQTT-Brokers (z.B. "192.168.1.42")
+BROKER           = "localhost"       # IP des MQTT-Brokers (z.B. "192.168.1.42")
 PORT             = 1883
-TOPIC            = "control/steering_cmd"
+TOPIC_LANESTATE  = "sensor/lanestate"
+TOPIC_CMD        = "control/steering_cmd"
 
 JOYSTICK_INDEX   = 0        # Index des Thrustmaster (0 = erstes Gerät)
 
@@ -67,6 +77,14 @@ STEER_GAIN       = 1.0      # Skalierung des Eingangssignals
 STEER_DEADZONE   = 0.03     # Totzone gegen Rauschen
 EMA_ALPHA        = 0.25     # Glättung des Zielsignals (0=glatt, 1=direkt)
 CMD_TIMEOUT_S    = 0.25     # Sekunden ohne MQTT → Rad zentrieren
+MIN_LANE_QUALITY = 0.3      # Mindestqualität der Ego-Lane
+
+# Lateralregler (Perception-State → Soll-Lenkwinkel)
+MAX_STEER_RAD    = 0.5
+K_STANLEY        = 1.0
+V_REF            = 20.0
+K_FF             = 8.0
+HISTORY_WINDOW_S = 0.5
 
 # Regelschleife
 CONTROL_HZ       = 100      # Regler-Frequenz in Hz
@@ -90,6 +108,12 @@ def apply_deadzone(x: float, dz: float) -> float:
 def ema(prev: float, new: float, alpha: float) -> float:
     return (1.0 - alpha) * prev + alpha * new
 
+def safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 
 # ── Shared State (thread-safe über Lock) ───────────────────────────────────
 
@@ -100,6 +124,7 @@ class State:
     last_msg_t   : float = 0.0   # Zeitstempel letzte MQTT-Nachricht
     last_error   : float = 0.0   # Für D-Anteil
     last_print_t : float = 0.0
+    current_angle: float = 0.0   # Aktueller Radwinkel -1..+1
     lock         : threading.Lock = field(default_factory=threading.Lock)
 
 state = State()
@@ -296,8 +321,26 @@ def stop_all(haptic):
 
 def on_connect(client, userdata, flags, reason_code, properties=None):
     print(f"[MQTT] Verbunden (rc={reason_code})")
-    client.subscribe(TOPIC)
-    print(f"[MQTT] Topic: {TOPIC}")
+    client.subscribe(TOPIC_LANESTATE)
+    print(f"[MQTT] Topic: {TOPIC_LANESTATE}")
+
+def build_control_payload(result: DriveControllerResult, source_payload: dict, wheel_norm: float, target_norm: float) -> dict:
+    cmd = result.command
+    return {
+        "t_ms": result.t_ms,
+        "valid": result.valid,
+        "reason": result.reason,
+        "quality": float(result.quality),
+        "steer_rad": cmd.steer_rad,
+        "steer_norm": cmd.steer_norm,
+        "ff_term": cmd.ff_term,
+        "offset_m": cmd.error_offset_m,
+        "heading_err_rad": safe_float(source_payload.get("heading_error_rad")),
+        "curvature": safe_float(source_payload.get("curvature_preview")),
+        "wheel_norm": float(wheel_norm),
+        "target_norm": float(target_norm),
+        "wheel_error_norm": float(target_norm - wheel_norm),
+    }
 
 def on_message(client, userdata, msg):
     try:
@@ -306,17 +349,26 @@ def on_message(client, userdata, msg):
         print(f"[MQTT] Ungültiges JSON: {e}")
         return
 
-    if "steer_norm" not in payload:
-        return
+    drive_controller = userdata["drive_controller"]
+    result = drive_controller.update_from_lanestate(payload, t=time.time())
 
-    raw    = float(payload["steer_norm"])
+    raw = float(result.command.steer_norm)
     scaled = clamp(raw * STEER_GAIN, -1.0, 1.0)
-    dz     = apply_deadzone(scaled, STEER_DEADZONE)
+    dz = apply_deadzone(scaled, STEER_DEADZONE)
 
+    now = time.time()
     with state.lock:
-        state.steer_ema    = ema(state.steer_ema, dz, EMA_ALPHA)
+        state.steer_ema = ema(state.steer_ema, dz, EMA_ALPHA)
         state.target_angle = state.steer_ema
-        state.last_msg_t   = time.time()
+        state.last_msg_t = now
+        wheel_norm = state.current_angle
+        target_norm = state.target_angle
+
+    control_payload = build_control_payload(result, payload, wheel_norm, target_norm)
+    client.publish(TOPIC_CMD, json.dumps(control_payload))
+
+    if not result.valid:
+        return
 
 
 # ── PD-Regelschleife ───────────────────────────────────────────────────────
@@ -324,7 +376,7 @@ def on_message(client, userdata, msg):
 def control_loop(joystick, haptic):
     """
     Läuft mit CONTROL_HZ.
-    Steuert das Rad zur Soll-Position (aus steer_norm) per PD-Regler.
+    Steuert das Rad zur Soll-Position (aus sensor/lanestate) per PD-Regler.
     """
     dt = 1.0 / CONTROL_HZ
     print(f"[REGLER] @ {CONTROL_HZ} Hz  |  KP={KP}  KD={KD}  MAX={MAX_TORQUE:.0%}")
@@ -355,6 +407,7 @@ def control_loop(joystick, haptic):
 
         with state.lock:
             state.last_error = error
+            state.current_angle = current
 
         # Debug-Ausgabe (gedrosselt)
         if now - state.last_print_t > 1.0 / DEBUG_HZ:
@@ -381,8 +434,18 @@ def main():
 
     joystick, haptic, name = init_wheel()
 
+    drive_controller = DriveController(
+        max_steer_rad=MAX_STEER_RAD,
+        k_stanley=K_STANLEY,
+        v_ref=V_REF,
+        k_ff=K_FF,
+        history_window_s=HISTORY_WINDOW_S,
+        min_quality=MIN_LANE_QUALITY,
+    )
+
     # MQTT in eigenem Thread
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="mqtt-to-ffb")
+    client.user_data_set({"drive_controller": drive_controller})
     client.on_connect = on_connect
     client.on_message = on_message
     print(f"[MQTT] Verbinde mit {BROKER}:{PORT} ...")

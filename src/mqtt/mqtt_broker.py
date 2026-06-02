@@ -8,12 +8,14 @@ BROKER = "localhost"
 RATE_HZ = 10  # Frequenz, mit der das Weltmodell publiziert wird (10 Hz)
 TOPIC_WORLD_STATE = "world/state"
 TOPIC_PERCEPTION_BASE = "sensor/#" # Abonniert alle Perception-Ergebnisse
+TOPIC_CONTROL_BASE = "control/#"   # Abonniert Drive-/Control-Diagnostik
 
 # Weltmodell (Die interne Datenstruktur) ---
 # Enthält nur die Daten
 world = {
     "objects": [],
     "lanestate": {"lane_center": 0.0, "curvature": 0.0},
+    "steering_cmd": {},
     "vehicle_state": {},              # <--- NEU
     "last_update_ts": time.time()
 }
@@ -38,6 +40,10 @@ def on_message(client, userdata, msg):
         if isinstance(data, dict):
             world["vehicle_state"] = data
 
+    elif msg.topic == "control/steering_cmd":
+        if isinstance(data, dict):
+            world["steering_cmd"] = data
+
     world["last_update_ts"] = time.time()
 
 
@@ -51,8 +57,9 @@ def main():
         client.connect(BROKER, 1883, keepalive=60)
         
         # Abonniert alle Topics unter sensor/
-        print(f"Verbinde zu Broker {BROKER}. Abonniere {TOPIC_PERCEPTION_BASE}...")
+        print(f"Verbinde zu Broker {BROKER}. Abonniere {TOPIC_PERCEPTION_BASE} und {TOPIC_CONTROL_BASE}...")
         client.subscribe(TOPIC_PERCEPTION_BASE, qos=1) 
+        client.subscribe(TOPIC_CONTROL_BASE, qos=1)
         
         client.loop_start() # Startet den Empfangs-Loop im Hintergrund
 

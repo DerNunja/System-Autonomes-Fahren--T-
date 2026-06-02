@@ -2,18 +2,17 @@
 
 ## Architektur
 
-Zwei Rechner kommunizieren über NDI (Video) und MQTT (Steuerung):
+Zwei Rechner kommunizieren über NDI (Video) und MQTT (Wahrnehmungs- und Diagnosedaten):
 
 ```
-[Simulator PC]                          [Perception PC]
-┌──────────────────┐                    ┌─────────────────────────────┐
-│ Fahrsimulator     │                    │ sender_video.py (NDI)       │
-│                   │  NDI Video ──────► │ receiver_video.py           │
-│ mqtt_to_xbox.py   │◄── MQTT ───────── │  ├─ Lane Detection (UFLD v2)│
-│ (Xbox-Emulation)  │   steering_cmd     │  ├─ World Model             │
-└──────────────────┘                    │  ├─ Stanley Controller        │
-                                        │  └─ MQTT Publisher            │
-                                        └─────────────────────────────┘
+[Simulator/Drive PC]                    [Perception PC]
+┌─────────────────────────────┐          ┌─────────────────────────────┐
+│ Fahrsimulator                │          │ sender_video.py (NDI)       │
+│ mqtt_to_thrustmaster.py      │          │ receiver_video.py           │
+│  ├─ drive_controller.py      │◄─ MQTT ─ │  ├─ Lane Detection (UFLD v2)│
+│  ├─ Thrustmaster FFB         │ lanestate│  ├─ World Model             │
+│  └─ steering_cmd diagnostics │─ MQTT ─► │  └─ MQTT Publisher          │
+└─────────────────────────────┘          └─────────────────────────────┘
 ```
 
 ## Voraussetzungen
@@ -59,9 +58,9 @@ uv run sender_video.py
 - `USE_LIVE_SOURCE = True` für Live-Kamera
 - Sendet NDI-Stream mit Name **"Demo"**
 
-### 2. Hauptskript - Lane Detection + Steuerung
+### 2. Wahrnehmungsskript - Lane Detection
 
-Empfängt NDI-Video, erkennt Fahrstreifen, berechnet Lenkbefehle, publiziert über MQTT.
+Empfängt NDI-Video, erkennt Fahrstreifen, bildet einen Ego-Spurzustand und publiziert diesen über MQTT.
 
 ```bash
 cd Behavioural_Cloning_Basic/ndi_tools/
@@ -71,40 +70,41 @@ uv run receiver_video.py
 **Was es macht:**
 - Verbindet sich zum NDI-Stream "Demo"
 - Lädt UFLD v2 Lane Detection Modell (ResNet34, ~826MB)
-- Verarbeitet jeden Frame: Lane Detection → Weltmodell → Stanley Controller
-- Publiziert Lenkbefehle auf `control/steering_cmd`
-- Publiziert Lane-Status auf `sensor/lanestate`
+- Verarbeitet jeden Frame: Lane Detection → Weltmodell → Lane-State MQTT
+- Publiziert erweiterten Lane-Status auf `sensor/lanestate`
 - Zeigt zwei OpenCV-Fenster: Original-Video und annotiertes Video
 
 **MQTT Topics die publiziert werden:**
 
 | Topic | Inhalt |
 |-------|--------|
-| `control/steering_cmd` | `{t_ms, steer_rad, steer_norm, ff_term, offset_m, heading_err_rad, curvature}` |
-| `sensor/lanestate` | `{lane_center, curvature}` |
+| `sensor/lanestate` | `{t_ms, has_ego_lane, offset_m, heading_error_rad, curvature_preview, quality, lane_center, curvature}` |
 
 ---
 
 ## Skripte auf dem Simulator PC
 
-### 3. MQTT → Xbox Controller Bridge
+### 3. MQTT → Thrustmaster Drive Controller
 
-Empfängt Lenkbefehle vom Perception PC und simuliert ein Xbox-Gamepad.
+Empfängt Lane-State vom Perception PC, berechnet Lenkbefehle auf dem Steuerrechner und bewegt das Thrustmaster-Lenkrad per Force Feedback.
 
 ```bash
 cd Behavioural_Cloning_Basic/drive/
-uv run mqtt_to_xbox.py
+uv run mqtt_to_thrustmaster.py
 ```
 
-**Wichtig:** `BROKER` in `mqtt_to_xbox.py` auf die IP des MQTT Brokers setzen (nicht leer lassen für Remote-Broker).
+**Wichtig:** `BROKER` in `mqtt_to_thrustmaster.py` auf die IP des MQTT Brokers setzen (nicht leer lassen für Remote-Broker).
 
 **Was es macht:**
-- Subscribt auf `control/steering_cmd`
+- Subscribt auf `sensor/lanestate`
+- Berechnet Lenkbefehle über `drive_controller.py`
+- Liest die aktuelle physische Lenkradposition lokal aus
 - Wendet an: Gain → Deadzone (0.03) → EMA-Smoothing (alpha=0.25)
-- Sendet an virtuellen Xbox 360 Controller (Left Stick X)
-- Safety-Timeout: bei 0.25s keine Befehle → Lenkrad zentrieren
+- Bewegt das Thrustmaster-Lenkrad per Force Feedback
+- Publiziert Diagnosewerte auf `control/steering_cmd`
+- Safety-Timeout: bei 0.25s keine Lane-State-Nachrichten → Lenkrad zentrieren
 
-**Parameter in `mqtt_to_xbox.py`:**
+**Parameter in `mqtt_to_thrustmaster.py`:**
 
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
@@ -118,10 +118,11 @@ uv run mqtt_to_xbox.py
 ## MQTT Topics Übersicht
 
 ```
-control/steering_cmd      ← receiver_video.py publiziert Lenkbefehle
-                            mqtt_to_xbox.py subscribt
+control/steering_cmd      ← mqtt_to_thrustmaster.py publiziert Lenkdiagnostik
+                            mqtt_to_xbox.py kann optional subscriben
 
 sensor/lanestate          ← receiver_video.py publiziert Lane-Status
+                            mqtt_to_thrustmaster.py subscribt
                             mqtt_broker.py aggregiert
                             ui_world.py subscribt (teilweise)
 
@@ -143,7 +144,7 @@ cd Behavioural_Cloning_Basic/mqtt/
 uv run mqtt_broker.py
 ```
 
-Publiziert alle 100ms (`world/state`) mit: `objects`, `lanestate`, `vehicle_state`, `last_update_ts`
+Publiziert alle 100ms (`world/state`) mit: `objects`, `lanestate`, `steering_cmd`, `vehicle_state`, `last_update_ts`
 
 ---
 
@@ -163,19 +164,19 @@ Zeigt: Lane-Offset, Krümmung, Fahrzeugzustand, erkannte Objekte, rohe JSON-Date
 ## Vollständiger Start-Ablauf
 
 ```bash
-# 1. MQTT Broker starten (auf beiden Rechnern oder zentral)
+# 1. MQTT Broker starten (empfohlen: Perception PC)
 mosquitto -p 1883
 
 # 2. Perception PC: Video-Quelle starten
 cd Behavioural_Cloning_Basic/ndi_tools/
 uv run sender_video.py          # Falls Simulator kein NDI direkt sendet
 
-# 3. Perception PC: Hauptsteuerung starten
-uv run receiver_video.py        # Lane Detection + MQTT Publishing
+# 3. Perception PC: Wahrnehmung starten
+uv run receiver_video.py        # Lane Detection + sensor/lanestate Publishing
 
-# 4. Simulator PC: MQTT → Xbox Bridge starten
+# 4. Simulator/Drive PC: MQTT → Thrustmaster starten
 cd Behavioural_Cloning_Basic/drive/
-uv run mqtt_to_xbox.py          # Konvertiert MQTT → Gamepad-Input
+uv run mqtt_to_thrustmaster.py  # Berechnet Lenkung + bewegt Lenkrad
 
 # Optional: Bridge + UI auf einem beliebigen Rechner
 cd Behavioural_Cloning_Basic/mqtt/
