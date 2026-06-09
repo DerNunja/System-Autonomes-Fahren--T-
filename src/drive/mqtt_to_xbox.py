@@ -20,11 +20,11 @@ DEBUG_PRINT_HZ = 10.0   # max. Prints pro Sekunde
 # Stick-Mapping
 # steer_norm: -1..+1  -> LeftStickX: -1..+1
 STEER_GAIN = 1.0              # Skalierung (z.B. 0.7 = sanfter)
-STEER_DEADZONE = 0.03         # Totzone gegen Zittern
+STEER_DEADZONE = 0.01         # Kleine Totzone, damit frühe Korrekturen erhalten bleiben
 STEER_MAX = 1.0               # Clamp
 
 # Smoothing / Safety
-EMA_ALPHA = 0.25              # 0..1 (kleiner = glatter, größer = direkter)
+EMA_ALPHA = 0.35              # 0..1 (kleiner = glatter, größer = direkter)
 CMD_TIMEOUT_S = 0.25          # wenn länger kein Cmd: Stick zentrieren
 
 # Optional: Falls du später Gas/Bremse mappen willst (Trigger 0..1)

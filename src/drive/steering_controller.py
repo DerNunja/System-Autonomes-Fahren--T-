@@ -19,7 +19,7 @@ class LateralController:
 
       δ = δ_ff + δ_fb
       δ_ff  ~ K_ff * kappa
-      δ_fb  ~ heading_error + atan2(k * e, v + v0)
+      δ_fb  ~ heading_error + atan2(k * e, v + v0) + k_d * de/dt
     """
 
     def __init__(
@@ -28,13 +28,17 @@ class LateralController:
         k_stanley: float = 1.0,       # Gain für Querfehler
         v_ref: float = 20.0,          # "virtuelle" Geschwindigkeit [m/s]
         k_ff: float = 8.0,            # Feed-Forward Gain (abhängig von Fahrzeug)
-        history_window_s: float = 0.5
+        history_window_s: float = 0.5,
+        k_d_offset: float = 0.0,       # Dämpfung/Frühreaktion auf Querfehler-Änderung
+        max_d_term_rad: float = 0.15,  # Limit gegen Sprünge bei verrauschtem Offset
     ):
         self.max_steer_rad = max_steer_rad
         self.k_stanley = k_stanley
         self.v_ref = v_ref
         self.k_ff = k_ff
         self.history_window_s = history_window_s
+        self.k_d_offset = k_d_offset
+        self.max_d_term_rad = max_d_term_rad
         self._history: Deque[Tuple[float, float]] = deque()   # (t, offset_m)
 
     def _update_history(self, offset_m: float, t: Optional[float] = None) -> float:
@@ -74,7 +78,11 @@ class LateralController:
         # klassisch: δ_fb = θ_e + atan2(k*e, v)
         steer_fb = heading_error_rad + math.atan2(self.k_stanley * e, max(0.1, v))
 
-        steer_rad = steer_ff + steer_fb
+        # Offset-Rate wirkt früh gegen Drift und reduziert die Korrektur beim Zurücklaufen.
+        steer_d = self.k_d_offset * d_offset_dt
+        steer_d = max(-self.max_d_term_rad, min(self.max_d_term_rad, steer_d))
+
+        steer_rad = steer_ff + steer_fb + steer_d
 
         # Sättigung
         steer_rad = max(-self.max_steer_rad, min(self.max_steer_rad, steer_rad))

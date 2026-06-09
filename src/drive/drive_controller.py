@@ -49,6 +49,8 @@ class DriveController:
         v_ref: float,
         k_ff: float,
         history_window_s: float,
+        k_d_offset: float,
+        max_d_term_rad: float,
         min_quality: float = 0.3,
     ):
         self.min_quality = min_quality
@@ -58,6 +60,8 @@ class DriveController:
             v_ref=v_ref,
             k_ff=k_ff,
             history_window_s=history_window_s,
+            k_d_offset=k_d_offset,
+            max_d_term_rad=max_d_term_rad,
         )
 
     def update_from_lanestate(

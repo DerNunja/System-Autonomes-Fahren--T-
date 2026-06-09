@@ -99,8 +99,9 @@ uv run drive/mqtt_to_thrustmaster.py
 - Subscribt auf `sensor/lanestate`
 - Berechnet Lenkbefehle über `drive_controller.py`
 - Liest die aktuelle physische Lenkradposition lokal aus
-- Wendet an: Gain → Deadzone (0.03) → EMA-Smoothing (alpha=0.25)
+- Wendet an: Gain → Deadzone (0.01) → EMA-Smoothing (alpha=0.35)
 - Bewegt das Thrustmaster-Lenkrad per Force Feedback
+- Lane Assist kann per Lenkrad-Button ein- und ausgeschaltet werden
 - Publiziert Diagnosewerte auf `control/steering_cmd`
 - Safety-Timeout: bei 0.25s keine Lane-State-Nachrichten → Lenkrad zentrieren
 
@@ -109,9 +110,13 @@ uv run drive/mqtt_to_thrustmaster.py
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
 | `STEER_GAIN` | 1.0 | Lenkungsverstärkung |
-| `STEER_DEADZONE` | 0.03 | Totzone gegen Zittern |
-| `EMA_ALPHA` | 0.25 | Smoothing (niedriger = glatter) |
+| `STEER_DEADZONE` | 0.01 | Totzone gegen Zittern, niedrig halten für frühe Korrekturen |
+| `EMA_ALPHA` | 0.35 | Smoothing (niedriger = glatter, höher = direkter) |
 | `CMD_TIMEOUT_S` | 0.25 | Safety-Timeout in Sekunden |
+| `K_STANLEY` | 2.0 | Querfehler-Verstärkung im Lateralregler |
+| `V_REF` | 8.0 | Virtuelle Geschwindigkeit; niedriger = stärkere Offset-Korrektur |
+| `K_D_OFFSET` | 0.20 | Dämpfung/Frühreaktion über Offset-Änderungsrate |
+| `LANE_ASSIST_TOGGLE_BUTTON` | 0 | SDL-Button-Index zum Ein-/Ausschalten; `-1` deaktiviert den Toggle |
 
 ---
 

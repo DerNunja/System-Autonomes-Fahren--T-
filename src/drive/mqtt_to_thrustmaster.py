@@ -64,6 +64,8 @@ TOPIC_LANESTATE  = "sensor/lanestate"
 TOPIC_CMD        = "control/steering_cmd"
 
 JOYSTICK_INDEX   = 0        # Index des Thrustmaster (0 = erstes Gerät)
+LANE_ASSIST_ENABLED_DEFAULT = True
+LANE_ASSIST_TOGGLE_BUTTON   = 0        # SDL-Button-Index; -1 deaktiviert den Toggle
 
 # Regler (Position → Drehmoment)
 KP               = 0.35     # Proportional – niedrig halten gegen Aufschaukeln!
@@ -74,17 +76,19 @@ FFB_DIRECTION    = +1       # +1 oder -1. Wird beim Start automatisch geprüft.
 
 # Eingang (MQTT)
 STEER_GAIN       = 1.0      # Skalierung des Eingangssignals
-STEER_DEADZONE   = 0.03     # Totzone gegen Rauschen
-EMA_ALPHA        = 0.25     # Glättung des Zielsignals (0=glatt, 1=direkt)
+STEER_DEADZONE   = 0.01     # Kleine Totzone, damit frühe Korrekturen erhalten bleiben
+EMA_ALPHA        = 0.35     # Glättung des Zielsignals (0=glatt, 1=direkt)
 CMD_TIMEOUT_S    = 0.25     # Sekunden ohne MQTT → Rad zentrieren
 MIN_LANE_QUALITY = 0.3      # Mindestqualität der Ego-Lane
 
 # Lateralregler (Perception-State → Soll-Lenkwinkel)
 MAX_STEER_RAD    = 0.5
-K_STANLEY        = 1.0
-V_REF            = 20.0
+K_STANLEY        = 2.0
+V_REF            = 8.0
 K_FF             = 8.0
-HISTORY_WINDOW_S = 0.5
+HISTORY_WINDOW_S = 0.35
+K_D_OFFSET       = 0.20
+MAX_D_TERM_RAD   = 0.12
 
 # Regelschleife
 CONTROL_HZ       = 100      # Regler-Frequenz in Hz
@@ -125,6 +129,8 @@ class State:
     last_error   : float = 0.0   # Für D-Anteil
     last_print_t : float = 0.0
     current_angle: float = 0.0   # Aktueller Radwinkel -1..+1
+    lane_assist_enabled: bool = LANE_ASSIST_ENABLED_DEFAULT
+    toggle_button_down : bool = False
     lock         : threading.Lock = field(default_factory=threading.Lock)
 
 state = State()
@@ -176,6 +182,33 @@ def get_angle(joystick) -> float:
         pass
     sdl2.SDL_JoystickUpdate()
     return sdl2.SDL_JoystickGetAxis(joystick, 0) / 32767.0
+
+
+def update_lane_assist_toggle(joystick, current_angle: float) -> bool:
+    if LANE_ASSIST_TOGGLE_BUTTON < 0:
+        return state.lane_assist_enabled
+
+    button_down = bool(sdl2.SDL_JoystickGetButton(joystick, LANE_ASSIST_TOGGLE_BUTTON))
+    changed = False
+
+    with state.lock:
+        if button_down and not state.toggle_button_down:
+            state.lane_assist_enabled = not state.lane_assist_enabled
+            state.toggle_button_down = True
+            state.steer_ema = current_angle
+            state.target_angle = current_angle
+            state.last_error = 0.0
+            changed = True
+        elif not button_down:
+            state.toggle_button_down = False
+
+        enabled = state.lane_assist_enabled
+
+    if changed:
+        status = "AN" if enabled else "AUS"
+        print(f"\n[LANE ASSIST] {status} (Button {LANE_ASSIST_TOGGLE_BUTTON})")
+
+    return enabled
 
 
 def test_ffb_direction(joystick, haptic):
@@ -324,17 +357,25 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
     client.subscribe(TOPIC_LANESTATE)
     print(f"[MQTT] Topic: {TOPIC_LANESTATE}")
 
-def build_control_payload(result: DriveControllerResult, source_payload: dict, wheel_norm: float, target_norm: float) -> dict:
+def build_control_payload(
+    result: DriveControllerResult,
+    source_payload: dict,
+    wheel_norm: float,
+    target_norm: float,
+    lane_assist_enabled: bool,
+) -> dict:
     cmd = result.command
     return {
         "t_ms": result.t_ms,
         "valid": result.valid,
+        "lane_assist_enabled": bool(lane_assist_enabled),
         "reason": result.reason,
         "quality": float(result.quality),
         "steer_rad": cmd.steer_rad,
         "steer_norm": cmd.steer_norm,
         "ff_term": cmd.ff_term,
         "offset_m": cmd.error_offset_m,
+        "d_offset_dt": cmd.d_offset_dt,
         "heading_err_rad": safe_float(source_payload.get("heading_error_rad")),
         "curvature": safe_float(source_payload.get("curvature_preview")),
         "wheel_norm": float(wheel_norm),
@@ -358,13 +399,18 @@ def on_message(client, userdata, msg):
 
     now = time.time()
     with state.lock:
-        state.steer_ema = ema(state.steer_ema, dz, EMA_ALPHA)
-        state.target_angle = state.steer_ema
+        lane_assist_enabled = state.lane_assist_enabled
+        if lane_assist_enabled:
+            state.steer_ema = ema(state.steer_ema, dz, EMA_ALPHA)
+            state.target_angle = state.steer_ema
+        else:
+            state.steer_ema = state.current_angle
+            state.target_angle = state.current_angle
         state.last_msg_t = now
         wheel_norm = state.current_angle
         target_norm = state.target_angle
 
-    control_payload = build_control_payload(result, payload, wheel_norm, target_norm)
+    control_payload = build_control_payload(result, payload, wheel_norm, target_norm, lane_assist_enabled)
     client.publish(TOPIC_CMD, json.dumps(control_payload))
 
     if not result.valid:
@@ -384,6 +430,8 @@ def control_loop(joystick, haptic):
 
     while True:
         now = time.time()
+        current = get_angle(joystick)
+        lane_assist_enabled = update_lane_assist_toggle(joystick, current)
 
         with state.lock:
             target   = state.target_angle
@@ -391,13 +439,33 @@ def control_loop(joystick, haptic):
             last_err = state.last_error
 
         # Timeout: kein MQTT seit CMD_TIMEOUT_S → sanft zentrieren
-        if last_t > 0 and (now - last_t) > CMD_TIMEOUT_S:
+        if lane_assist_enabled and last_t > 0 and (now - last_t) > CMD_TIMEOUT_S:
             with state.lock:
                 state.steer_ema    = ema(state.steer_ema, 0.0, 0.3)
                 state.target_angle = state.steer_ema
                 target             = state.target_angle
 
-        current = get_angle(joystick)
+        if not lane_assist_enabled:
+            set_torque(haptic, 0.0)
+            with state.lock:
+                state.current_angle = current
+                state.last_error = 0.0
+
+            if now - state.last_print_t > 1.0 / DEBUG_HZ:
+                bar_pos = int((current + 1) / 2 * 30)
+                bar = "·" * bar_pos + "●" + "·" * (30 - bar_pos)
+                print(
+                    f"\r  [{bar}]"
+                    f"  Assist:AUS"
+                    f"  Ist:{current:+.3f}"
+                    f"  Trq:{0.0:+.3f}  ",
+                    end="", flush=True
+                )
+                state.last_print_t = now
+
+            time.sleep(dt)
+            continue
+
         error   = target - current
 
         d_error = (error - last_err) / dt
@@ -415,6 +483,7 @@ def control_loop(joystick, haptic):
             bar = "·" * bar_pos + "●" + "·" * (30 - bar_pos)
             print(
                 f"\r  [{bar}]"
+                f"  Assist:AN"
                 f"  Soll:{target:+.3f}"
                 f"  Ist:{current:+.3f}"
                 f"  Err:{error:+.3f}"
@@ -440,6 +509,8 @@ def main():
         v_ref=V_REF,
         k_ff=K_FF,
         history_window_s=HISTORY_WINDOW_S,
+        k_d_offset=K_D_OFFSET,
+        max_d_term_rad=MAX_D_TERM_RAD,
         min_quality=MIN_LANE_QUALITY,
     )
 

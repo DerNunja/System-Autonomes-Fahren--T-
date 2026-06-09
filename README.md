@@ -118,6 +118,7 @@ Bei Betrieb über zwei Rechner muss `BROKER` im Drive-Skript auf die IP des MQTT
 ## Dokumentation
 
 - `SETUP.md`: konkrete Startanleitung und Rechneraufteilung
+- `STEERING_TUNING.md`: Lenkparameter, aktuelle Defaults und Tuning-Anleitung
 - `codebase-understanding.md`: technische Codebase-übersicht
 - `docs.md`: ausformulierte Projektdokumentation
 
